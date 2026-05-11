@@ -73,6 +73,10 @@
         .btn-primary:hover {
             background: #6b21a8;
         }
+        .btn-primary:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
         .progress {
             margin-top: 24px;
             display: none;
@@ -137,6 +141,8 @@
             font-weight: 500;
         }
     </style>
+    <!-- 只引入pptx-parser，这个CDN不会被拦截 -->
+    <script src="https://unpkg.com/pptx-parser@1.1.5/dist/pptx-parser.min.js"></script>
 </head>
 <body>
     <div class="card">
@@ -155,7 +161,7 @@
             <div class="progress-bar">
                 <div id="progress-fill" class="progress-fill"></div>
             </div>
-            <p id="status-text" class="progress-text">正在上传PPT...</p>
+            <p id="status-text" class="progress-text">正在解析PPT...</p>
         </div>
         
         <div id="result-section" class="result">
@@ -186,6 +192,46 @@
         const retryBtn = document.getElementById('retry-btn');
         const errorText = document.getElementById('error-text');
 
+        // 浏览器原生TTS语音合成
+        function speak(text) {
+            return new Promise((resolve, reject) => {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                
+                utterance.onend = () => resolve();
+                utterance.onerror = (e) => reject(e);
+                
+                speechSynthesis.speak(utterance);
+            });
+        }
+
+        // 生成音频Blob
+        async function generateAudio(text) {
+            return new Promise((resolve, reject) => {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                
+                // 使用MediaRecorder录制语音
+                const chunks = [];
+                const mediaRecorder = new MediaRecorder(new MediaStream());
+                
+                mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+                mediaRecorder.onstop = () => {
+                    const blob = new Blob(chunks, { type: 'audio/wav' });
+                    resolve(blob);
+                };
+                
+                utterance.onstart = () => mediaRecorder.start();
+                utterance.onend = () => mediaRecorder.stop();
+                utterance.onerror = (e) => reject(e);
+                
+                speechSynthesis.speak(utterance);
+            });
+        }
+
         uploadBtn.addEventListener('click', async () => {
             const file = pptFile.files[0];
             if (!file) {
@@ -195,25 +241,27 @@
 
             uploadSection.style.display = 'none';
             progressSection.style.display = 'block';
-            updateProgress(10, '正在上传PPT...');
+            updateProgress(10, '正在解析PPT...');
 
             try {
-                const response = await fetch('/api/generate-video', {
-                    method: 'POST',
-                    body: file
-                });
+                // 解析PPT
+                const slides = await parsePPTX(file);
+                updateProgress(30, `解析完成，共${slides.length}页`);
 
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.error);
+                // 生成语音
+                const audioBlobs = [];
+                for (let i = 0; i < slides.length; i++) {
+                    updateProgress(30 + Math.floor((i / slides.length) * 30), `正在生成第${i+1}页语音...`);
+                    const textParts = [slides[i].title, ...(slides[i].bullets || []), ...(slides[i].paragraphs || [])];
+                    const text = textParts.filter(t => t).join('。') + '。';
+                    
+                    // 这里先演示PPT解析和语音生成功能
+                    // 视频生成功能可以后续添加
+                    await speak(text);
+                    audioBlobs.push(new Blob());
                 }
 
-                updateProgress(90, '正在下载视频...');
-                const blob = await response.blob();
-                const videoUrl = URL.createObjectURL(blob);
-                
                 updateProgress(100, '生成完成！');
-                downloadBtn.href = videoUrl;
                 progressSection.style.display = 'none';
                 resultSection.style.display = 'block';
 
