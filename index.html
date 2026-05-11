@@ -131,133 +131,145 @@
     </div>
 
     <script type="module">
-        // 纯前端导入所有依赖，不需要任何后端
-        import { parsePPTX } from 'https://esm.sh/pptx-parser@1.1.5';
+        // 修正导入方式，使用默认导出
+        import pptxParser from 'https://esm.sh/pptx-parser@1.1.5';
         import { FFmpeg } from 'https://esm.sh/@ffmpeg/ffmpeg@0.12.10';
         import { fetchFile, toBlobURL } from 'https://esm.sh/@ffmpeg/util@0.12.1';
 
-        const uploadBtn = document.getElementById('upload-btn');
-        const pptFile = document.getElementById('ppt-file');
-        const uploadSection = document.getElementById('upload-section');
-        const progressSection = document.getElementById('progress-section');
-        const resultSection = document.getElementById('result-section');
-        const errorSection = document.getElementById('error-section');
-        const progressFill = document.getElementById('progress-fill');
-        const statusText = document.getElementById('status-text');
-        const downloadBtn = document.getElementById('download-btn');
-        const resetBtn = document.getElementById('reset-btn');
-        const retryBtn = document.getElementById('retry-btn');
-        const errorText = document.getElementById('error-text');
+        // 页面加载完成后再绑定事件，确保所有元素都已加载
+        window.addEventListener('DOMContentLoaded', () => {
+            const uploadBtn = document.getElementById('upload-btn');
+            const pptFile = document.getElementById('ppt-file');
+            const uploadSection = document.getElementById('upload-section');
+            const progressSection = document.getElementById('progress-section');
+            const resultSection = document.getElementById('result-section');
+            const errorSection = document.getElementById('error-section');
+            const progressFill = document.getElementById('progress-fill');
+            const statusText = document.getElementById('status-text');
+            const downloadBtn = document.getElementById('download-btn');
+            const resetBtn = document.getElementById('reset-btn');
+            const retryBtn = document.getElementById('retry-btn');
+            const errorText = document.getElementById('error-text');
 
-        let ffmpeg;
+            let ffmpeg;
 
-        async function initFFmpeg() {
-            if (ffmpeg) return;
-            ffmpeg = new FFmpeg();
-            await ffmpeg.load({
-                coreURL: await toBlobURL('https://esm.sh/@ffmpeg/core@0.12.0/dist/umd/ffmpeg-core.js', 'text/javascript'),
-                wasmURL: await toBlobURL('https://esm.sh/@ffmpeg/core@0.12.0/dist/umd/ffmpeg-core.wasm', 'application/wasm'),
-            });
-        }
+            async function initFFmpeg() {
+                if (ffmpeg) return;
+                ffmpeg = new FFmpeg();
+                await ffmpeg.load({
+                    coreURL: await toBlobURL('https://esm.sh/@ffmpeg/core@0.12.0/dist/umd/ffmpeg-core.js', 'text/javascript'),
+                    wasmURL: await toBlobURL('https://esm.sh/@ffmpeg/core@0.12.0/dist/umd/ffmpeg-core.wasm', 'application/wasm'),
+                });
+            }
 
-        // 生成单页视频
-        async function generateSlideVideo(slide, index, duration=5) {
-            const title = slide.title?.trim() || '无标题';
-            const content = [...(slide.bullets || []), ...(slide.paragraphs || [])]
-                .map(t => t.trim()).filter(t => t).join(' ');
+            // 生成单页视频
+            async function generateSlideVideo(slide, index, duration=5) {
+                const title = slide.title?.trim() || '无标题';
+                const content = [...(slide.bullets || []), ...(slide.paragraphs || [])]
+                    .map(t => t.trim()).filter(t => t).join(' ');
 
-            const outputName = `slide_${index}.mp4`;
-            
-            // 生成纯文字视频
-            await ffmpeg.exec([
-                '-f', 'lavfi', `-i`, `color=c=#f5f5f5:s=1920x1080:d=${duration}`,
-                '-vf', `drawtext=text='${title.replace(/'/g, "'\\''")}':fontsize=72:fontcolor=#1a1a1a:x=(w-text_w)/2:y=200:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf,
-                        drawtext=text='${content.substring(0, 200).replace(/'/g, "'\\''")}':fontsize=32:fontcolor=#444444:x=200:y=400:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`,
-                '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
-                '-t', duration.toString(),
-                outputName
-            ]);
-
-            return outputName;
-        }
-
-        uploadBtn.addEventListener('click', async () => {
-            const file = pptFile.files[0];
-            if (!file) { alert('请先选择PPT文件'); return; }
-
-            uploadSection.style.display = 'none';
-            progressSection.style.display = 'block';
-            
-            try {
-                updateProgress(10, '正在解析PPT...');
-                // 纯前端解析PPT，不需要后端
-                const slides = await parsePPTX(file);
-                updateProgress(20, `解析完成，共${slides.length}页`);
-
-                updateProgress(30, '正在加载视频生成器...');
-                await initFFmpeg();
-
-                const slideFiles = [];
-                for (let i = 0; i < slides.length; i++) {
-                    updateProgress(30 + Math.floor((i / slides.length) * 60), `正在生成第${i+1}页视频...`);
-                    const name = await generateSlideVideo(slides[i], i);
-                    slideFiles.push(name);
-                }
-
-                updateProgress(90, '正在合并视频...');
-                const concatContent = slideFiles.map(f => `file '${f}'`).join('\n');
-                await ffmpeg.writeFile('concat.txt', concatContent);
+                const outputName = `slide_${index}.mp4`;
                 
+                // 生成纯文字视频
                 await ffmpeg.exec([
-                    '-f', 'concat', '-safe', '0', '-i', 'concat.txt',
-                    '-c', 'copy', 'output.mp4'
+                    '-f', 'lavfi', `-i`, `color=c=#f5f5f5:s=1920x1080:d=${duration}`,
+                    '-vf', `drawtext=text='${title.replace(/'/g, "'\\''")}':fontsize=72:fontcolor=#1a1a1a:x=(w-text_w)/2:y=200:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf,
+                            drawtext=text='${content.substring(0, 200).replace(/'/g, "'\\''")}':fontsize=32:fontcolor=#444444:x=200:y=400:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`,
+                    '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+                    '-t', duration.toString(),
+                    outputName
                 ]);
 
-                const data = await ffmpeg.readFile('output.mp4');
-                const videoBlob = new Blob([data.buffer], { type: 'video/mp4' });
-                const videoUrl = URL.createObjectURL(videoBlob);
+                return outputName;
+            }
 
-                updateProgress(100, '生成完成！');
-                downloadBtn.href = videoUrl;
-                progressSection.style.display = 'none';
-                resultSection.style.display = 'block';
-
-                // 自动播放语音讲解
-                for (const slide of slides) {
-                    const text = slide.title + '。' + [...(slide.bullets || []), ...(slide.paragraphs || [])].join('。');
-                    await new Promise((resolve) => {
-                        const utterance = new SpeechSynthesisUtterance(text);
-                        utterance.lang = 'zh-CN';
-                        utterance.rate = 1.0;
-                        utterance.onend = resolve;
-                        speechSynthesis.speak(utterance);
-                    });
+            uploadBtn.addEventListener('click', async () => {
+                const file = pptFile.files[0];
+                if (!file) { 
+                    alert('请先选择PPT文件'); 
+                    return; 
                 }
 
-            } catch (error) {
-                console.error(error);
-                progressSection.style.display = 'none';
-                errorText.textContent = error.message;
-                errorSection.style.display = 'block';
+                uploadSection.style.display = 'none';
+                progressSection.style.display = 'block';
+                
+                try {
+                    updateProgress(10, '正在解析PPT...');
+                    // 修正调用方式，使用pptxParser.parse
+                    const rawSlides = await pptxParser.parse(file);
+                    const slides = rawSlides.map(slide => ({
+                        title: slide.title?.trim() || '无标题',
+                        bullets: (slide.bullets || []).map(b => b.trim()).filter(b => b),
+                        paragraphs: (slide.paragraphs || []).map(p => p.trim()).filter(p => p)
+                    }));
+                    
+                    updateProgress(20, `解析完成，共${slides.length}页`);
+
+                    updateProgress(30, '正在加载视频生成器...');
+                    await initFFmpeg();
+
+                    const slideFiles = [];
+                    for (let i = 0; i < slides.length; i++) {
+                        updateProgress(30 + Math.floor((i / slides.length) * 60), `正在生成第${i+1}页视频...`);
+                        const name = await generateSlideVideo(slides[i], i);
+                        slideFiles.push(name);
+                    }
+
+                    updateProgress(90, '正在合并视频...');
+                    const concatContent = slideFiles.map(f => `file '${f}'`).join('\n');
+                    await ffmpeg.writeFile('concat.txt', concatContent);
+                    
+                    await ffmpeg.exec([
+                        '-f', 'concat', '-safe', '0', '-i', 'concat.txt',
+                        '-c', 'copy', 'output.mp4'
+                    ]);
+
+                    const data = await ffmpeg.readFile('output.mp4');
+                    const videoBlob = new Blob([data.buffer], { type: 'video/mp4' });
+                    const videoUrl = URL.createObjectURL(videoBlob);
+
+                    updateProgress(100, '生成完成！');
+                    downloadBtn.href = videoUrl;
+                    progressSection.style.display = 'none';
+                    resultSection.style.display = 'block';
+
+                    // 自动播放语音讲解
+                    for (const slide of slides) {
+                        const text = slide.title + '。' + [...(slide.bullets || []), ...(slide.paragraphs || [])].join('。');
+                        await new Promise((resolve) => {
+                            const utterance = new SpeechSynthesisUtterance(text);
+                            utterance.lang = 'zh-CN';
+                            utterance.rate = 1.0;
+                            utterance.onend = resolve;
+                            speechSynthesis.speak(utterance);
+                        });
+                    }
+
+                } catch (error) {
+                    console.error('生成错误:', error);
+                    progressSection.style.display = 'none';
+                    errorText.textContent = error.message;
+                    errorSection.style.display = 'block';
+                }
+            });
+
+            function updateProgress(percent, status) {
+                progressFill.style.width = `${percent}%`;
+                statusText.textContent = status;
             }
+
+            function reset() {
+                uploadSection.style.display = 'block';
+                progressSection.style.display = 'none';
+                resultSection.style.display = 'none';
+                errorSection.style.display = 'none';
+                pptFile.value = '';
+                speechSynthesis.cancel();
+            }
+
+            resetBtn.addEventListener('click', reset);
+            retryBtn.addEventListener('click', reset);
         });
-
-        function updateProgress(percent, status) {
-            progressFill.style.width = `${percent}%`;
-            statusText.textContent = status;
-        }
-
-        function reset() {
-            uploadSection.style.display = 'block';
-            progressSection.style.display = 'none';
-            resultSection.style.display = 'none';
-            errorSection.style.display = 'none';
-            pptFile.value = '';
-            speechSynthesis.cancel();
-        }
-
-        resetBtn.addEventListener('click', reset);
-        retryBtn.addEventListener('click', reset);
     </script>
 </body>
 </html>
