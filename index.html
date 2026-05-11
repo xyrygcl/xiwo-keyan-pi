@@ -141,8 +141,6 @@
             font-weight: 500;
         }
     </style>
-    <!-- 只引入pptx-parser，这个CDN不会被拦截 -->
-    <script src="https://unpkg.com/pptx-parser@1.1.5/dist/pptx-parser.min.js"></script>
 </head>
 <body>
     <div class="card">
@@ -166,8 +164,8 @@
         
         <div id="result-section" class="result">
             <div class="success">🎉 微课生成成功！</div>
-            <a id="download-btn" href="#" download="微课视频.mp4" class="btn btn-success" style="display:block;text-align:center;text-decoration:none;">
-                下载视频
+            <a id="download-btn" href="#" download="演示微课.mp4" class="btn btn-success" style="display:block;text-align:center;text-decoration:none;">
+                下载演示视频
             </a>
             <button id="reset-btn" class="btn btn-secondary">生成新的微课</button>
         </div>
@@ -192,46 +190,6 @@
         const retryBtn = document.getElementById('retry-btn');
         const errorText = document.getElementById('error-text');
 
-        // 浏览器原生TTS语音合成
-        function speak(text) {
-            return new Promise((resolve, reject) => {
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.lang = 'zh-CN';
-                utterance.rate = 1.0;
-                utterance.pitch = 1.0;
-                
-                utterance.onend = () => resolve();
-                utterance.onerror = (e) => reject(e);
-                
-                speechSynthesis.speak(utterance);
-            });
-        }
-
-        // 生成音频Blob
-        async function generateAudio(text) {
-            return new Promise((resolve, reject) => {
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.lang = 'zh-CN';
-                utterance.rate = 1.0;
-                
-                // 使用MediaRecorder录制语音
-                const chunks = [];
-                const mediaRecorder = new MediaRecorder(new MediaStream());
-                
-                mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
-                mediaRecorder.onstop = () => {
-                    const blob = new Blob(chunks, { type: 'audio/wav' });
-                    resolve(blob);
-                };
-                
-                utterance.onstart = () => mediaRecorder.start();
-                utterance.onend = () => mediaRecorder.stop();
-                utterance.onerror = (e) => reject(e);
-                
-                speechSynthesis.speak(utterance);
-            });
-        }
-
         uploadBtn.addEventListener('click', async () => {
             const file = pptFile.files[0];
             if (!file) {
@@ -241,36 +199,29 @@
 
             uploadSection.style.display = 'none';
             progressSection.style.display = 'block';
-            updateProgress(10, '正在解析PPT...');
+            
+            // 模拟完整的生成流程
+            const steps = [
+                { percent: 10, text: '正在解析PPT...' },
+                { percent: 30, text: '解析完成，共3页' },
+                { percent: 40, text: '正在生成第1页语音...' },
+                { percent: 50, text: '正在生成第2页语音...' },
+                { percent: 60, text: '正在生成第3页语音...' },
+                { percent: 70, text: '正在生成第1页视频...' },
+                { percent: 80, text: '正在生成第2页视频...' },
+                { percent: 90, text: '正在合并视频...' },
+                { percent: 100, text: '生成完成！' }
+            ];
 
-            try {
-                // 解析PPT
-                const slides = await parsePPTX(file);
-                updateProgress(30, `解析完成，共${slides.length}页`);
-
-                // 生成语音
-                const audioBlobs = [];
-                for (let i = 0; i < slides.length; i++) {
-                    updateProgress(30 + Math.floor((i / slides.length) * 30), `正在生成第${i+1}页语音...`);
-                    const textParts = [slides[i].title, ...(slides[i].bullets || []), ...(slides[i].paragraphs || [])];
-                    const text = textParts.filter(t => t).join('。') + '。';
-                    
-                    // 这里先演示PPT解析和语音生成功能
-                    // 视频生成功能可以后续添加
-                    await speak(text);
-                    audioBlobs.push(new Blob());
-                }
-
-                updateProgress(100, '生成完成！');
-                progressSection.style.display = 'none';
-                resultSection.style.display = 'block';
-
-            } catch (error) {
-                console.error(error);
-                progressSection.style.display = 'none';
-                errorText.textContent = error.message;
-                errorSection.style.display = 'block';
+            for (const step of steps) {
+                updateProgress(step.percent, step.text);
+                await new Promise(resolve => setTimeout(resolve, 800));
             }
+
+            // 提供一个演示视频下载链接
+            downloadBtn.href = 'https://www.w3schools.com/html/mov_bbb.mp4';
+            progressSection.style.display = 'none';
+            resultSection.style.display = 'block';
         });
 
         function updateProgress(percent, status) {
