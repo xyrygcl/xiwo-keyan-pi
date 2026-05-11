@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>希沃课研π - 自动微课生成工具</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: system-ui, sans-serif; }
+        body {
+            background: linear-gradient(135deg, #581c87, #1e3a8a);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+            padding: 48px;
+            max-width: 480px;
+            width: 100%;
+        }
+        h1 { text-align: center; color: #7e22ce; font-size: 32px; font-weight: bold; margin-bottom: 24px; }
+        .subtitle { text-align: center; color: #4b5563; margin-bottom: 32px; }
+        .file-input { margin-bottom: 24px; }
+        .file-input label { display: block; margin-bottom: 8px; color: #374151; font-weight: 500; }
+        input[type="file"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            background: #f9fafb;
+        }
+        .btn {
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: 9999px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .btn-primary { background: #7e22ce; color: white; }
+        .btn-primary:hover { background: #6b21a8; }
+        .btn-primary:disabled { background: #9ca3af; cursor: not-allowed; }
+        .progress { margin-top: 24px; display: none; }
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e5e7eb;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+        .progress-fill {
+            height: 100%;
+            background: #7e22ce;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        .progress-text { text-align: center; color: #4b5563; }
+        .result { margin-top: 24px; display: none; }
+        .success {
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+            text-align: center;
+            color: #166534;
+            font-weight: 500;
+        }
+        .btn-success {
+            background: #16a34a;
+            color: white;
+            margin-bottom: 12px;
+            display: block;
+            text-align: center;
+            text-decoration: none;
+        }
+        .btn-success:hover { background: #15803d; }
+        .btn-secondary { background: #e5e7eb; color: #374151; }
+        .btn-secondary:hover { background: #d1d5db; }
+        .error {
+            margin-top: 24px;
+            display: none;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+            text-align: center;
+            color: #991b1b;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>希沃课研π</h1>
+        <p class="subtitle">上传PPT，一键生成音视频同步的精品微课</p>
+        
+        <div id="upload-section">
+            <div class="file-input">
+                <label>选择PPT文件（.pptx）</label>
+                <input type="file" id="ppt-file" accept=".pptx">
+            </div>
+            <button id="upload-btn" class="btn btn-primary">开始生成微课</button>
+        </div>
+        
+        <div id="progress-section" class="progress">
+            <div class="progress-bar">
+                <div id="progress-fill" class="progress-fill"></div>
+            </div>
+            <p id="status-text" class="progress-text">正在上传PPT...</p>
+        </div>
+        
+        <div id="result-section" class="result">
+            <div class="success">🎉 微课生成成功！</div>
+            <a id="download-btn" href="#" download="微课视频.mp4" class="btn btn-success">下载视频</a>
+            <button id="reset-btn" class="btn btn-secondary">生成新的微课</button>
+        </div>
+        
+        <div id="error-section" class="error">
+            <p id="error-text">生成失败，请重试</p>
+            <button id="retry-btn" class="btn btn-secondary" style="margin-top:16px;">重新生成</button>
+        </div>
+    </div>
+
+    <script>
+        // 纯原生JavaScript，没有任何外部依赖
+        const uploadBtn = document.getElementById('upload-btn');
+        const pptFile = document.getElementById('ppt-file');
+        const uploadSection = document.getElementById('upload-section');
+        const progressSection = document.getElementById('progress-section');
+        const resultSection = document.getElementById('result-section');
+        const errorSection = document.getElementById('error-section');
+        const progressFill = document.getElementById('progress-fill');
+        const statusText = document.getElementById('status-text');
+        const downloadBtn = document.getElementById('download-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const retryBtn = document.getElementById('retry-btn');
+        const errorText = document.getElementById('error-text');
+
+        uploadBtn.addEventListener('click', async () => {
+            const file = pptFile.files[0];
+            if (!file) { alert('请先选择PPT文件'); return; }
+
+            uploadSection.style.display = 'none';
+            progressSection.style.display = 'block';
+            updateProgress(10, '正在上传PPT...');
+
+            try {
+                const response = await fetch('/api/generate-video', {
+                    method: 'POST',
+                    body: file
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || '生成失败');
+                }
+
+                updateProgress(90, '正在下载视频...');
+                const blob = await response.blob();
+                const videoUrl = URL.createObjectURL(blob);
+                
+                updateProgress(100, '生成完成！');
+                downloadBtn.href = videoUrl;
+                progressSection.style.display = 'none';
+                resultSection.style.display = 'block';
+
+            } catch (error) {
+                console.error(error);
+                progressSection.style.display = 'none';
+                errorText.textContent = error.message;
+                errorSection.style.display = 'block';
+            }
+        });
+
+        function updateProgress(percent, status) {
+            progressFill.style.width = `${percent}%`;
+            statusText.textContent = status;
+        }
+
+        function reset() {
+            uploadSection.style.display = 'block';
+            progressSection.style.display = 'none';
+            resultSection.style.display = 'none';
+            errorSection.style.display = 'none';
+            pptFile.value = '';
+        }
+
+        resetBtn.addEventListener('click', reset);
+        retryBtn.addEventListener('click', reset);
+    </script>
+</body>
+</html>
