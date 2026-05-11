@@ -34,7 +34,7 @@
                     <div id="progress-bar" class="bg-purple-600 h-2.5 rounded-full" style="width: 0%"></div>
                 </div>
             </div>
-            <p id="status-text" class="text-center text-gray-600">正在上传PPT...</p>
+            <p id="status-text" class="text-center text-gray-600">正在加载FFmpeg...</p>
         </div>
         
         <div id="result-section" class="hidden">
@@ -59,7 +59,114 @@
         </div>
     </div>
 
-    <script>
+    <script type="module">
+        // 使用ES模块方式导入FFmpeg，这是官方推荐的方式，不会被浏览器拦截
+        import { FFmpeg } from 'https://esm.sh/@ffmpeg/ffmpeg@0.12.0';
+        import { fetchFile, toBlobURL } from 'https://esm.sh/@ffmpeg/util@0.12.0';
+
+        let ffmpeg;
+
+        async function initFFmpeg() {
+            ffmpeg = new FFmpeg();
+            const baseURL = 'https://esm.sh/@ffmpeg/core@0.12.0/dist/umd';
+            await ffmpeg.load({
+                coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+                wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+            });
+        }
+
+        function escapeText(text) {
+            if (!text) return "";
+            return text.replace(/'/g, "'\\''").replace(/:/g, '\\:').replace(/\n/g, '\\n');
+        }
+
+        function splitText(text, maxChars) {
+            if (!text || text.length <= maxChars) return [text || ""];
+            const lines = [];
+            let current = "";
+            for (const char of text) {
+                if (current.length >= maxChars) {
+                    lines.push(current);
+                    current = char;
+                } else {
+                    current += char;
+                }
+            }
+            if (current) lines.push(current);
+            return lines;
+        }
+
+        async function generateSlideVideo(slide, audioBlob, index) {
+            const audioName = `audio_${index}.mp3`;
+            await ffmpeg.writeFile(audioName, new Uint8Array(await audioBlob.arrayBuffer()));
+
+            const { stdout } = await ffmpeg.exec([
+                '-i', audioName, '-v', 'error', '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1'
+            ]);
+            const duration = parseFloat(stdout) + 0.5;
+
+            const filters = [];
+            filters.push(`color=c=#f5f5f5:s=1920x1080:d=${duration}[bg]`);
+            filters.push("[bg]drawbox=x=100:y=80:w=180:h=50:color=#ff9800:t=fill[bg1]");
+            filters.push(
+                "[bg1]drawtext=text='知识要点':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:fontsize=40:fontcolor=white:x=140:y=92[v0]"
+            );
+
+            let current = 'v0';
+            let layerNum = 1;
+            const title = escapeText(slide.title || `第${index+1}页`);
+
+            filters.push(
+                `[${current}]drawtext=text='${title}':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:fontsize=72:fontcolor=#1a1a1a:x=(w-text_w)/2:y=200[v${layerNum}]`
+            );
+            current = `v${layerNum++}`;
+
+            filters.push(`[${current}]drawbox=x=200:y=350:w=1520:h=600:color=white:t=fill[v${layerNum}]`);
+            current = `v${layerNum++}`;
+            filters.push(`[${current}]drawbox=x=200:y=350:w=1520:h=600:color=#e0e0e0:t=2[v${layerNum}]`);
+            current = `v${layerNum++}`;
+
+            if (slide.paragraphs && slide.paragraphs.length > 0) {
+                const lines = splitText(slide.paragraphs[0].substring(0, 300), 24);
+                let y = 400;
+                for (let i = 0; i < Math.min(lines.length, 12); i++) {
+                    const line = escapeText(lines[i]);
+                    filters.push(
+                        `[${current}]drawtext=text='${line}':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:fontsize=32:fontcolor=#444444:x=250:y=${y}[v${layerNum}]`
+                    );
+                    current = `v${layerNum++}`;
+                    y += 50;
+                }
+            }
+
+            const filterComplex = filters.join(';');
+            const outputName = `slide_${index}.mp4`;
+
+            await ffmpeg.exec([
+                '-i', audioName, '-filter_complex', filterComplex,
+                '-map', `[${current}]`, '-map', '0:a',
+                '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+                '-c:a', 'aac', '-b:a', '192k', '-t', duration.toString(),
+                '-shortest', outputName
+            ]);
+
+            return outputName;
+        }
+
+        async function mergeVideos(slideNames) {
+            const concatContent = slideNames.map(name => `file '${name}'`).join('\n');
+            await ffmpeg.writeFile('concat.txt', concatContent);
+
+            await ffmpeg.exec([
+                '-f', 'concat', '-safe', '0', '-i', 'concat.txt',
+                '-c', 'copy', 'output.mp4'
+            ]);
+
+            const data = await ffmpeg.readFile('output.mp4');
+            return new Blob([data.buffer], { type: 'video/mp4' });
+        }
+
         async function generateLesson() {
             const file = document.getElementById('ppt-file').files[0];
             if (!file) {
@@ -69,24 +176,47 @@
 
             document.getElementById('upload-section').classList.add('hidden');
             document.getElementById('progress-section').classList.remove('hidden');
-            updateProgress(10, '正在上传PPT...');
+            updateProgress(5, '正在加载FFmpeg...');
 
             try {
-                const response = await fetch('/api/generate-video', {
+                await initFFmpeg();
+                updateProgress(10, '正在解析PPT...');
+
+                const parseRes = await fetch('/api/parse-ppt', {
                     method: 'POST',
                     body: file
                 });
+                if (!parseRes.ok) throw new Error((await parseRes.json()).error);
+                const { slides } = await parseRes.json();
+                updateProgress(20, `解析完成，共${slides.length}页`);
 
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.error);
+                const audioBlobs = [];
+                for (let i = 0; i < slides.length; i++) {
+                    updateProgress(20 + Math.floor((i / slides.length) * 30), `正在生成第${i+1}页语音...`);
+                    const textParts = [slides[i].title, ...(slides[i].bullets || []), ...(slides[i].paragraphs || [])];
+                    const text = textParts.filter(t => t).join('。') + '。';
+                    
+                    const ttsRes = await fetch('/api/tts', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text })
+                    });
+                    if (!ttsRes.ok) throw new Error('语音生成失败');
+                    audioBlobs.push(await ttsRes.blob());
                 }
 
-                updateProgress(90, '正在下载视频...');
-                const blob = await response.blob();
-                const videoUrl = URL.createObjectURL(blob);
-                
+                const slideNames = [];
+                for (let i = 0; i < slides.length; i++) {
+                    updateProgress(50 + Math.floor((i / slides.length) * 40), `正在生成第${i+1}页视频...`);
+                    const name = await generateSlideVideo(slides[i], audioBlobs[i], i);
+                    slideNames.push(name);
+                }
+
+                updateProgress(90, '正在合并视频...');
+                const videoBlob = await mergeVideos(slideNames);
+
                 updateProgress(100, '生成完成！');
+                const videoUrl = URL.createObjectURL(videoBlob);
                 document.getElementById('download-btn').href = videoUrl;
                 document.getElementById('progress-section').classList.add('hidden');
                 document.getElementById('result-section').classList.remove('hidden');
@@ -106,16 +236,19 @@
         }
 
         function reset() {
-            document.getElementById('upload-section').classList.remove('hidden');
+            document.getElementById('upload-section').classList.add('hidden');
             document.getElementById('progress-section').classList.add('hidden');
             document.getElementById('result-section').classList.add('hidden');
             document.getElementById('error-section').classList.add('hidden');
             document.getElementById('ppt-file').value = '';
         }
 
-        document.getElementById('upload-btn').addEventListener('click', generateLesson);
-        document.getElementById('reset-btn').addEventListener('click', reset);
-        document.getElementById('retry-btn').addEventListener('click', reset);
+        // 页面加载完成后绑定事件
+        window.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('upload-btn').addEventListener('click', generateLesson);
+            document.getElementById('reset-btn').addEventListener('click', reset);
+            document.getElementById('retry-btn').addEventListener('click', reset);
+        });
     </script>
 </body>
 </html>
