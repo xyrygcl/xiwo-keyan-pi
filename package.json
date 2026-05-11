@@ -1,7 +1,0 @@
-{
-  "name": "xiwo-keyan-pi",
-  "version": "1.0.0",
-  "dependencies": {
-    "pptx-parser": "1.1.5"
-  }
-}
