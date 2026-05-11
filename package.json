@@ -1,0 +1,11 @@
+{
+  "name": "xiwo-keyan-pi",
+  "version": "1.0.0",
+  "dependencies": {
+    "edge-tts": "^6.1.9",
+    "pptx-parser": "^1.1.5"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
