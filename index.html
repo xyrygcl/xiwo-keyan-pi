@@ -115,7 +115,7 @@
             <div class="progress-bar">
                 <div id="progress-fill" class="progress-fill"></div>
             </div>
-            <p id="status-text" class="progress-text">正在上传PPT...</p>
+            <p id="status-text" class="progress-text">正在解析PPT...</p>
         </div>
         
         <div id="result-section" class="result">
@@ -130,8 +130,11 @@
         </div>
     </div>
 
-    <script>
-        // 纯原生JavaScript，没有任何外部依赖
+    <script type="module">
+        // 使用ES模块导入FFmpeg，这是唯一不会被浏览器拦截的方式
+        import { FFmpeg } from 'https://esm.sh/@ffmpeg/ffmpeg@0.12.10';
+        import { fetchFile, toBlobURL } from 'https://esm.sh/@ffmpeg/util@0.12.1';
+
         const uploadBtn = document.getElementById('upload-btn');
         const pptFile = document.getElementById('ppt-file');
         const uploadSection = document.getElementById('upload-section');
@@ -145,29 +148,123 @@
         const retryBtn = document.getElementById('retry-btn');
         const errorText = document.getElementById('error-text');
 
+        let ffmpeg;
+
+        async function initFFmpeg() {
+            if (ffmpeg) return;
+            ffmpeg = new FFmpeg();
+            await ffmpeg.load({
+                coreURL: await toBlobURL('https://esm.sh/@ffmpeg/core@0.12.0/dist/umd/ffmpeg-core.js', 'text/javascript'),
+                wasmURL: await toBlobURL('https://esm.sh/@ffmpeg/core@0.12.0/dist/umd/ffmpeg-core.wasm', 'application/wasm'),
+            });
+        }
+
+        // 浏览器原生TTS生成音频Blob
+        async function generateAudio(text) {
+            return new Promise((resolve, reject) => {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+
+                const audioContext = new AudioContext();
+                const destination = audioContext.createMediaStreamDestination();
+                const mediaRecorder = new MediaRecorder(destination.stream);
+                const chunks = [];
+
+                mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+                mediaRecorder.onstop = () => {
+                    const blob = new Blob(chunks, { type: 'audio/webm' });
+                    resolve(blob);
+                };
+
+                utterance.onstart = () => {
+                    const source = audioContext.createMediaStreamSource(
+                        audioContext.createMediaStreamDestination().stream
+                    );
+                    source.connect(destination);
+                    mediaRecorder.start();
+                };
+
+                utterance.onend = () => {
+                    mediaRecorder.stop();
+                };
+
+                utterance.onerror = (e) => reject(e);
+                speechSynthesis.speak(utterance);
+            });
+        }
+
+        async function generateSlideVideo(slide, index) {
+            const text = slide.title + '。' + [...slide.bullets, ...slide.paragraphs].join('。');
+            const audioBlob = await generateAudio(text);
+            const audioName = `audio_${index}.webm`;
+            await ffmpeg.writeFile(audioName, new Uint8Array(await audioBlob.arrayBuffer()));
+
+            const { stdout } = await ffmpeg.exec([
+                '-i', audioName, '-v', 'error', '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1'
+            ]);
+            const duration = parseFloat(stdout) + 0.5;
+
+            const outputName = `slide_${index}.mp4`;
+            await ffmpeg.exec([
+                '-f', 'lavfi', `-i`, `color=c=#f5f5f5:s=1920x1080:d=${duration}`,
+                '-i', audioName,
+                '-vf', `drawtext=text='${slide.title.replace(/'/g, "'\\''")}':fontsize=72:fontcolor=#1a1a1a:x=(w-text_w)/2:y=200,
+                        drawtext=text='${[...slide.bullets, ...slide.paragraphs].join(' ').substring(0, 200).replace(/'/g, "'\\''")}':fontsize=32:fontcolor=#444444:x=200:y=400`,
+                '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+                '-c:a', 'aac', '-b:a', '192k',
+                '-shortest', outputName
+            ]);
+
+            return outputName;
+        }
+
         uploadBtn.addEventListener('click', async () => {
             const file = pptFile.files[0];
             if (!file) { alert('请先选择PPT文件'); return; }
 
             uploadSection.style.display = 'none';
             progressSection.style.display = 'block';
-            updateProgress(10, '正在上传PPT...');
-
+            
             try {
-                const response = await fetch('/api/generate-video', {
+                updateProgress(10, '正在解析PPT...');
+                const parseRes = await fetch('/api/parse-ppt', {
                     method: 'POST',
                     body: file
                 });
 
-                if (!response.ok) {
-                    const err = await response.json();
-                    throw new Error(err.error || '生成失败');
+                if (!parseRes.ok) {
+                    const err = await parseRes.json();
+                    throw new Error(err.error);
                 }
 
-                updateProgress(90, '正在下载视频...');
-                const blob = await response.blob();
-                const videoUrl = URL.createObjectURL(blob);
+                const { slides } = await parseRes.json();
+                updateProgress(20, `解析完成，共${slides.length}页`);
+
+                updateProgress(30, '正在加载FFmpeg...');
+                await initFFmpeg();
+
+                const slideFiles = [];
+                for (let i = 0; i < slides.length; i++) {
+                    updateProgress(30 + Math.floor((i / slides.length) * 60), `正在生成第${i+1}页视频...`);
+                    const name = await generateSlideVideo(slides[i], i);
+                    slideFiles.push(name);
+                }
+
+                updateProgress(90, '正在合并视频...');
+                const concatContent = slideFiles.map(f => `file '${f}'`).join('\n');
+                await ffmpeg.writeFile('concat.txt', concatContent);
                 
+                await ffmpeg.exec([
+                    '-f', 'concat', '-safe', '0', '-i', 'concat.txt',
+                    '-c', 'copy', 'output.mp4'
+                ]);
+
+                const data = await ffmpeg.readFile('output.mp4');
+                const videoBlob = new Blob([data.buffer], { type: 'video/mp4' });
+                const videoUrl = URL.createObjectURL(videoBlob);
+
                 updateProgress(100, '生成完成！');
                 downloadBtn.href = videoUrl;
                 progressSection.style.display = 'none';
