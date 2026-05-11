@@ -6,6 +6,6 @@
     "pptx-parser": "^1.1.5"
   },
   "engines": {
-    "node": "18.x"
+    "node": "20.x"
   }
 }
