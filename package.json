@@ -2,8 +2,6 @@
   "name": "xiwo-keyan-pi",
   "version": "1.0.0",
   "dependencies": {
-    "pptx-parser": "1.1.5",
-    "@ffmpeg/ffmpeg": "0.12.10",
-    "@ffmpeg/util": "0.12.1"
+    "pptx-parser": "1.1.5"
   }
 }
