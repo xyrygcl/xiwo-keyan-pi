@@ -1,10 +1,7 @@
 import { parsePPTX } from 'pptx-parser';
-import { Communicate } from 'edge-tts';
+import * as edgeTts from 'edge-tts';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
 
 export const config = {
   maxDuration: 60
@@ -24,25 +21,21 @@ export default async function handler(req, res) {
   }
 
   try {
-    const tempDir = os.tmpdir();
-    const tempPath = path.join(tempDir, `ppt-${Date.now()}.pptx`);
-    
+    // 1. 解析上传的PPT
     const chunks = [];
     for await (const chunk of req) {
       chunks.push(chunk);
     }
     const buffer = Buffer.concat(chunks);
-    fs.writeFileSync(tempPath, buffer);
 
-    const rawSlides = await parsePPTX(tempPath);
+    const rawSlides = await parsePPTX(buffer);
     const slides = rawSlides.map(slide => ({
       title: slide.title?.trim() || '',
       bullets: (slide.bullets || []).map(b => b.trim()).filter(b => b),
       paragraphs: (slide.paragraphs || []).map(p => p.trim()).filter(p => p)
     }));
 
-    fs.unlinkSync(tempPath);
-
+    // 2. 初始化FFmpeg
     const ffmpeg = new FFmpeg();
     const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.0/dist/umd';
     await ffmpeg.load({
@@ -50,12 +43,14 @@ export default async function handler(req, res) {
       wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
     });
 
+    // 3. 逐页生成语音和视频
     const slideNames = [];
     for (let i = 0; i < slides.length; i++) {
+      // 生成语音
       const textParts = [slides[i].title, ...slides[i].bullets, ...slides[i].paragraphs];
       const text = textParts.filter(t => t).join('。') + '。';
       
-      const communicate = new Communicate(text, 'zh-CN-XiaoxiaoNeural', {
+      const communicate = new edgeTts.Communicate(text, 'zh-CN-XiaoxiaoNeural', {
         rate: '1.0',
         volume: '1.0'
       });
@@ -70,12 +65,14 @@ export default async function handler(req, res) {
       const audioName = `audio_${i}.mp3`;
       await ffmpeg.writeFile(audioName, new Uint8Array(audioBuffer));
 
+      // 获取语音时长
       const { stdout } = await ffmpeg.exec([
         '-i', audioName, '-v', 'error', '-show_entries', 'format=duration',
         '-of', 'default=noprint_wrappers=1:nokey=1'
       ]);
       const duration = parseFloat(stdout) + 0.5;
 
+      // 生成视频画面
       const filters = [];
       filters.push(`color=c=#f5f5f5:s=1920x1080:d=${duration}[bg]`);
       filters.push("[bg]drawbox=x=100:y=80:w=180:h=50:color=#ff9800:t=fill[bg1]");
@@ -124,6 +121,7 @@ export default async function handler(req, res) {
       slideNames.push(outputName);
     }
 
+    // 4. 合并所有视频
     const concatContent = slideNames.map(name => `file '${name}'`).join('\n');
     await ffmpeg.writeFile('concat.txt', concatContent);
 
@@ -132,6 +130,7 @@ export default async function handler(req, res) {
       '-c', 'copy', 'output.mp4'
     ]);
 
+    // 5. 返回生成的视频
     const data = await ffmpeg.readFile('output.mp4');
     
     res.setHeader('Content-Type', 'video/mp4');
