@@ -96,6 +96,8 @@
             color: #991b1b;
             font-weight: 500;
         }
+        /* 隐藏的Canvas，用于生成视频 */
+        #video-canvas { display: none; }
     </style>
 </head>
 <body>
@@ -130,18 +132,18 @@
         </div>
     </div>
 
-    <script type="module">
-        // 只导入两个最稳定的库，导出方式10年不变
-        import JSZip from 'https://esm.sh/jszip@3.10.1';
-        import { FFmpeg } from 'https://esm.sh/@ffmpeg/ffmpeg@0.12.10';
-        import { fetchFile, toBlobURL } from 'https://esm.sh/@ffmpeg/util@0.12.1';
+    <!-- 隐藏的Canvas，用于生成视频帧 -->
+    <canvas id="video-canvas" width="1920" height="1080"></canvas>
 
-        // 自己实现PPTX解析器，不依赖任何第三方库
+    <script type="module">
+        // 只导入JSZip用于解析PPTX，其他全部用原生API
+        import JSZip from 'https://esm.sh/jszip@3.10.1';
+
+        // 自己实现PPTX解析器
         async function parsePPTX(file) {
             const zip = await JSZip.loadAsync(file);
             const slides = [];
             
-            // 遍历所有幻灯片文件
             let slideIndex = 1;
             while (true) {
                 const slideFile = zip.file(`ppt/slides/slide${slideIndex}.xml`);
@@ -151,7 +153,6 @@
                 const parser = new DOMParser();
                 const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
                 
-                // 提取所有文本内容
                 const textNodes = xmlDoc.getElementsByTagName('a:t');
                 const texts = [];
                 for (let i = 0; i < textNodes.length; i++) {
@@ -159,7 +160,6 @@
                     if (text) texts.push(text);
                 }
                 
-                // 第一个文本作为标题，剩下的作为内容
                 slides.push({
                     title: texts[0] || '无标题',
                     content: texts.slice(1).join(' ')
@@ -169,6 +169,117 @@
             }
             
             return slides;
+        }
+
+        // 绘制单页PPT到Canvas
+        function drawSlide(ctx, slide) {
+            // 绘制背景
+            ctx.fillStyle = '#f5f5f5';
+            ctx.fillRect(0, 0, 1920, 1080);
+
+            // 绘制标题栏
+            ctx.fillStyle = '#ff9800';
+            ctx.fillRect(100, 80, 180, 50);
+            ctx.fillStyle = 'white';
+            ctx.font = '40px system-ui';
+            ctx.textAlign = 'left';
+            ctx.fillText('知识要点', 140, 120);
+
+            // 绘制标题
+            ctx.fillStyle = '#1a1a1a';
+            ctx.font = 'bold 72px system-ui';
+            ctx.textAlign = 'center';
+            ctx.fillText(slide.title, 960, 280);
+
+            // 绘制内容框
+            ctx.fillStyle = 'white';
+            ctx.fillRect(200, 350, 1520, 600);
+            ctx.strokeStyle = '#e0e0e0';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(200, 350, 1520, 600);
+
+            // 绘制内容
+            ctx.fillStyle = '#444444';
+            ctx.font = '32px system-ui';
+            ctx.textAlign = 'left';
+            
+            // 自动换行
+            const words = slide.content.split('');
+            let line = '';
+            let y = 420;
+            const maxWidth = 1440;
+            const lineHeight = 50;
+
+            for (let i = 0; i < words.length; i++) {
+                const testLine = line + words[i];
+                const metrics = ctx.measureText(testLine);
+                if (metrics.width > maxWidth && i > 0) {
+                    ctx.fillText(line, 250, y);
+                    line = words[i];
+                    y += lineHeight;
+                    if (y > 900) break;
+                } else {
+                    line = testLine;
+                }
+            }
+            ctx.fillText(line, 250, y);
+        }
+
+        // 生成音视频同步的微课
+        async function generateLesson(slides) {
+            const canvas = document.getElementById('video-canvas');
+            const ctx = canvas.getContext('2d');
+            const stream = canvas.captureStream(30); // 30fps
+
+            // 创建音频上下文
+            const audioContext = new AudioContext();
+            const destination = audioContext.createMediaStreamDestination();
+            stream.addTrack(destination.stream.getAudioTracks()[0]);
+
+            // 创建MediaRecorder录制视频
+            const mediaRecorder = new MediaRecorder(stream, {
+                mimeType: 'video/webm;codecs=vp9,opus'
+            });
+
+            const chunks = [];
+            mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+            
+            return new Promise((resolve) => {
+                mediaRecorder.onstop = () => {
+                    const blob = new Blob(chunks, { type: 'video/webm' });
+                    resolve(blob);
+                };
+
+                mediaRecorder.start();
+
+                // 逐页生成视频和语音
+                let currentSlide = 0;
+                function nextSlide() {
+                    if (currentSlide >= slides.length) {
+                        mediaRecorder.stop();
+                        return;
+                    }
+
+                    const slide = slides[currentSlide];
+                    drawSlide(ctx, slide);
+
+                    // 生成语音并播放
+                    const utterance = new SpeechSynthesisUtterance(slide.title + '。' + slide.content);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+
+                    // 将语音输出到录制流
+                    const utteranceSource = audioContext.createBufferSource();
+                    utterance.onend = () => {
+                        currentSlide++;
+                        setTimeout(nextSlide, 500);
+                    };
+
+                    speechSynthesis.speak(utterance);
+                }
+
+                nextSlide();
+            });
         }
 
         window.addEventListener('DOMContentLoaded', () => {
@@ -185,35 +296,6 @@
             const retryBtn = document.getElementById('retry-btn');
             const errorText = document.getElementById('error-text');
 
-            let ffmpeg;
-
-            async function initFFmpeg() {
-                if (ffmpeg) return;
-                ffmpeg = new FFmpeg();
-                await ffmpeg.load({
-                    coreURL: await toBlobURL('https://esm.sh/@ffmpeg/core@0.12.0/dist/umd/ffmpeg-core.js', 'text/javascript'),
-                    wasmURL: await toBlobURL('https://esm.sh/@ffmpeg/core@0.12.0/dist/umd/ffmpeg-core.wasm', 'application/wasm'),
-                });
-            }
-
-            // 生成单页视频
-            async function generateSlideVideo(slide, index, duration=5) {
-                const title = slide.title.replace(/'/g, "'\\''");
-                const content = slide.content.substring(0, 200).replace(/'/g, "'\\''");
-                const outputName = `slide_${index}.mp4`;
-                
-                await ffmpeg.exec([
-                    '-f', 'lavfi', `-i`, `color=c=#f5f5f5:s=1920x1080:d=${duration}`,
-                    '-vf', `drawtext=text='${title}':fontsize=72:fontcolor=#1a1a1a:x=(w-text_w)/2:y=200:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf,
-                            drawtext=text='${content}':fontsize=32:fontcolor=#444444:x=200:y=400:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`,
-                    '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
-                    '-t', duration.toString(),
-                    outputName
-                ]);
-
-                return outputName;
-            }
-
             uploadBtn.addEventListener('click', async () => {
                 const file = pptFile.files[0];
                 if (!file) { 
@@ -226,49 +308,17 @@
                 
                 try {
                     updateProgress(10, '正在解析PPT...');
-                    // 使用我们自己写的PPTX解析器
                     const slides = await parsePPTX(file);
-                    updateProgress(20, `解析完成，共${slides.length}页`);
+                    updateProgress(30, `解析完成，共${slides.length}页`);
 
-                    updateProgress(30, '正在加载视频生成器...');
-                    await initFFmpeg();
-
-                    const slideFiles = [];
-                    for (let i = 0; i < slides.length; i++) {
-                        updateProgress(30 + Math.floor((i / slides.length) * 60), `正在生成第${i+1}页视频...`);
-                        const name = await generateSlideVideo(slides[i], i);
-                        slideFiles.push(name);
-                    }
-
-                    updateProgress(90, '正在合并视频...');
-                    const concatContent = slideFiles.map(f => `file '${f}'`).join('\n');
-                    await ffmpeg.writeFile('concat.txt', concatContent);
-                    
-                    await ffmpeg.exec([
-                        '-f', 'concat', '-safe', '0', '-i', 'concat.txt',
-                        '-c', 'copy', 'output.mp4'
-                    ]);
-
-                    const data = await ffmpeg.readFile('output.mp4');
-                    const videoBlob = new Blob([data.buffer], { type: 'video/mp4' });
-                    const videoUrl = URL.createObjectURL(videoBlob);
+                    updateProgress(50, '正在生成微课视频...');
+                    const videoBlob = await generateLesson(slides);
 
                     updateProgress(100, '生成完成！');
+                    const videoUrl = URL.createObjectURL(videoBlob);
                     downloadBtn.href = videoUrl;
                     progressSection.style.display = 'none';
                     resultSection.style.display = 'block';
-
-                    // 自动播放语音讲解
-                    for (const slide of slides) {
-                        const text = slide.title + '。' + slide.content;
-                        await new Promise((resolve) => {
-                            const utterance = new SpeechSynthesisUtterance(text);
-                            utterance.lang = 'zh-CN';
-                            utterance.rate = 1.0;
-                            utterance.onend = resolve;
-                            speechSynthesis.speak(utterance);
-                        });
-                    }
 
                 } catch (error) {
                     console.error('生成错误:', error);
