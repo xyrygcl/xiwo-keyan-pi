@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PPT真实生成MP4微课｜无FFmpeg依赖</title>
+<title>PPT微课生成器｜带图文字幕</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#222831;color:#eee;padding:20px;font-family:system-ui}
@@ -25,12 +25,12 @@ a{color:#00adb5}
 </head>
 <body>
 <div class="container">
-  <h1>PPT真实生成MP4微课</h1>
+  <h1>PPT微课生成器｜带图文字幕</h1>
   <div class="upload-box">
     <p>上传 .pptx 文件</p>
     <input type="file" id="pptFile" accept=".pptx"/>
     <br/>
-    <button id="startBtn">开始生成标准视频</button>
+    <button id="startBtn">开始生成视频</button>
   </div>
 
   <div class="progress" id="progressBox">
@@ -41,10 +41,11 @@ a{color:#00adb5}
   <div class="error" id="errorBox"></div>
   <div class="result" id="resBox">
     <p>✅ 视频生成完成</p>
-    <a href="" id="downLink" download="微课.webm">下载视频</a>
+    <a href="" id="downLink" download="微课视频.webm">下载视频</a>
   </div>
 </div>
 
+<!-- 隐藏画布，用于绘制视频帧 -->
 <canvas id="canvas" width="1280" height="720"></canvas>
 
 <script type="module">
@@ -54,76 +55,108 @@ const $ = s=>document.querySelector(s);
 const canvas = $("#canvas");
 const ctx = canvas.getContext("2d");
 
-// 1. 真实解析PPT：提取【每页图片 + 所有文本】
+// 1. 解析PPT，提取每页的文字和图片
 async function parsePPTX(file){
   const zip = await JSZip.loadAsync(file);
   const slides = [];
-  let idx = 1;
+  let slideIndex = 1;
 
   while(true){
-    const slideXmlPath = `ppt/slides/slide${idx}.xml`;
+    const slideXmlPath = `ppt/slides/slide${slideIndex}.xml`;
     const slideFile = zip.file(slideXmlPath);
     if(!slideFile) break;
 
+    // 解析XML中的所有文本
     const xmlTxt = await slideFile.async("text");
     const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(xmlTxt,"text/xml");
-    const textNodes = xmlDoc.querySelectorAll("a\\:t");
-    let text = "";
-    textNodes.forEach(t=>text += t.textContent+" ");
+    const xmlDoc = parser.parseFromString(xmlTxt, "text/xml");
+    const textNodes = xmlDoc.getElementsByTagName("a:t");
+    let fullText = "";
+    for(let t of textNodes) {
+      fullText += t.textContent.trim() + " ";
+    }
 
-    // 提取当前页第一张背景图/幻灯片图
-    let imgEntry = null;
-    const files = Object.keys(zip.files);
-    for(let f of files){
-      if(f.includes(`slide${idx}`) && (f.endsWith(".png")||f.endsWith(".jpg"))){
-        imgEntry = f;break;
+    // 提取幻灯片中的图片
+    let img = null;
+    // 查找当前幻灯片的图片（如 slide1.xml.rels 引用的图片）
+    const imgPattern = new RegExp(`ppt/media/image.*\\.(png|jpg|jpeg)`);
+    const allFiles = Object.keys(zip.files);
+    for(let f of allFiles){
+      if(f.match(imgPattern)){
+        const arrBuf = await zip.file(f).async("arraybuffer");
+        const blob = new Blob([arrBuf]);
+        const url = URL.createObjectURL(blob);
+        img = await new Promise((resolve) => {
+          const image = new Image();
+          image.onload = () => resolve(image);
+          image.src = url;
+        });
+        break;
       }
     }
 
-    let img = null;
-    if(imgEntry){
-      const arrBuf = await zip.file(imgEntry).async("arraybuffer");
-      const blob = new Blob([arrBuf]);
-      const url = URL.createObjectURL(blob);
-      img = await new Promise((resolve, reject) => {
-        const image = new Image();
-        image.onload = () => resolve(image);
-        image.onerror = reject;
-        image.src = url;
-      });
-    }
-
     slides.push({
-      index:idx,
-      text:text.trim()||"无内容",
+      index: slideIndex,
+      text: fullText.trim() || `第${slideIndex}页（无文字内容）`,
       img
     });
-    idx++;
+    slideIndex++;
   }
   return slides;
 }
 
-// 2. 绘制单页到Canvas
-function drawSlide(slide){
-  // 清空画布
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0,0,canvas.width,canvas.height);
+// 2. 把单页PPT完整绘制到Canvas（含图片+文字+字幕背景）
+function drawSlideToCanvas(slide){
+  // 1. 先画背景
+  ctx.fillStyle = "#f5f5f5";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // 绘制图片（如果有）
+  // 2. 有图片就画图片，占满画布
   if(slide.img){
     ctx.drawImage(slide.img, 0, 0, canvas.width, canvas.height);
   }
 
-  // 绘制文字
-  ctx.fillStyle = "#333";
-  ctx.font = "bold 48px sans-serif";
+  // 3. 画字幕背景条（半透明黑底，提升文字可读性）
+  const textBgY = canvas.height - 120;
+  ctx.fillStyle = "rgba(0,0,0,0.7)";
+  ctx.fillRect(0, textBgY, canvas.width, 120);
+
+  // 4. 画文字（标题+内容，分行显示）
+  ctx.fillStyle = "#ffffff";
   ctx.textAlign = "center";
-  ctx.fillText(slide.text.substring(0, 40), canvas.width/2, canvas.height/2);
+  ctx.textBaseline = "middle";
+
+  // 自动分行，避免超出宽度
+  const maxWidth = canvas.width - 100;
+  const fontSize = 36;
+  ctx.font = `bold ${fontSize}px system-ui, sans-serif`;
+  const words = slide.text.split("");
+  let line = "";
+  let lines = [];
+
+  for(let i=0; i<words.length; i++){
+    const testLine = line + words[i];
+    if(ctx.measureText(testLine).width > maxWidth && line){
+      lines.push(line);
+      line = words[i];
+    } else {
+      line = testLine;
+    }
+  }
+  if(line) lines.push(line);
+
+  // 只显示最多3行文字，避免超出字幕区域
+  lines = lines.slice(0,3);
+  const lineHeight = fontSize + 10;
+  const startY = textBgY + 60 - (lines.length-1)*lineHeight/2;
+
+  lines.forEach((l, i) => {
+    ctx.fillText(l, canvas.width/2, startY + i*lineHeight);
+  });
 }
 
-// 3. 用MediaRecorder生成视频
-async function recordVideo(slides, duration=3000){
+// 3. 录制视频（带真实PPT内容）
+async function recordVideo(slides, pageDuration=3000){
   const stream = canvas.captureStream(30);
   const recorder = new MediaRecorder(stream, {
     mimeType: "video/webm; codecs=vp9"
@@ -140,56 +173,56 @@ async function recordVideo(slides, duration=3000){
 
     recorder.start();
 
-    let index = 0;
-    function drawNext(){
-      if(index >= slides.length){
+    let currentIndex = 0;
+    function drawNextPage(){
+      if(currentIndex >= slides.length){
         recorder.stop();
         return;
       }
 
-      drawSlide(slides[index]);
-      index++;
-      setTimeout(drawNext, duration);
+      drawSlideToCanvas(slides[currentIndex]);
+      currentIndex++;
+      setTimeout(drawNextPage, pageDuration);
     }
 
-    drawNext();
+    drawNextPage();
   });
 }
 
-// 进度更新
-function setProgress(p,txt){
-  $("#progressFill").style.width = p+"%";
-  $("#statusTxt").innerText = txt;
+// 进度条更新
+function setProgress(percent, text){
+  $("#progressFill").style.width = `${percent}%`;
+  $("#statusTxt").innerText = text;
 }
 
 // 主流程
-$("#startBtn").addEventListener("click",async ()=>{
+$("#startBtn").addEventListener("click", async () => {
   const file = $("#pptFile").files[0];
-  if(!file) return alert("请选择PPTX文件");
+  if(!file) return alert("请先选择PPT文件");
 
-  $("#progressBox").style.display="block";
-  $("#errorBox").style.display="none";
-  $("#resBox").style.display="none";
-  $("#startBtn").disabled=true;
+  $("#progressBox").style.display = "block";
+  $("#errorBox").style.display = "none";
+  $("#resBox").style.display = "none";
+  $("#startBtn").disabled = true;
 
   try{
-    setProgress(10,"解析PPT：提取图文...");
+    setProgress(10, "正在解析PPT，提取图文...");
     const slides = await parsePPTX(file);
-    if(!slides.length) throw new Error("未读取到幻灯片");
+    if(slides.length === 0) throw new Error("未解析到任何幻灯片");
 
-    setProgress(50,"生成视频...");
+    setProgress(50, `解析完成，共${slides.length}页，正在生成视频...`);
     const videoBlob = await recordVideo(slides, 3000);
 
-    setProgress(100,"生成完成");
+    setProgress(100, "生成完成！");
     const url = URL.createObjectURL(videoBlob);
     $("#downLink").href = url;
-    $("#resBox").style.display="block";
-  }catch(err){
-    $("#errorBox").style.display="block";
-    $("#errorBox").innerText = "失败："+err.message;
+    $("#resBox").style.display = "block";
+  } catch(err){
+    $("#errorBox").style.display = "block";
+    $("#errorBox").innerText = `生成失败：${err.message}`;
     console.error(err);
-  }finally{
-    $("#startBtn").disabled=false;
+  } finally {
+    $("#startBtn").disabled = false;
   }
 });
 </script>
