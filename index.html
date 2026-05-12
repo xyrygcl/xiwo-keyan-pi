@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PPT真实生成MP4微课｜图文+配音</title>
+<title>PPT真实生成MP4微课｜无FFmpeg依赖</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#222831;color:#eee;padding:20px;font-family:system-ui}
@@ -20,6 +20,7 @@ button:disabled{background:#555;cursor:not-allowed}
 .error{color:#f56;margin-top:10px;display:none}
 .result{margin-top:15px;display:none}
 a{color:#00adb5}
+#canvas{display:none}
 </style>
 </head>
 <body>
@@ -29,7 +30,7 @@ a{color:#00adb5}
     <p>上传 .pptx 文件</p>
     <input type="file" id="pptFile" accept=".pptx"/>
     <br/>
-    <button id="startBtn">开始生成标准MP4</button>
+    <button id="startBtn">开始生成标准视频</button>
   </div>
 
   <div class="progress" id="progressBox">
@@ -40,37 +41,20 @@ a{color:#00adb5}
   <div class="error" id="errorBox"></div>
   <div class="result" id="resBox">
     <p>✅ 视频生成完成</p>
-    <a href="" id="downLink" download="微课.mp4">下载MP4视频</a>
+    <a href="" id="downLink" download="微课.webm">下载视频</a>
   </div>
 </div>
 
+<canvas id="canvas" width="1280" height="720"></canvas>
+
 <script type="module">
 import JSZip from "https://esm.sh/jszip@3.10.1";
-import { FFmpeg } from "https://esm.sh/@ffmpeg/ffmpeg@0.12.10";
-import { toBlobURL } from "https://esm.sh/@ffmpeg/util@0.12.1";
 
 const $ = s=>document.querySelector(s);
-let ffmpeg = null;
-let slideList = [];
+const canvas = $("#canvas");
+const ctx = canvas.getContext("2d");
 
-// 页面加载时自动预加载ffmpeg
-async function initFFmpeg(){
-  if(ffmpeg) return;
-  try {
-    ffmpeg = new FFmpeg();
-    const base = "https://esm.sh/@ffmpeg/core@0.12.0/dist/umd";
-    const coreURL = await toBlobURL(`${base}/ffmpeg-core.js`, "text/javascript");
-    const wasmURL = await toBlobURL(`${base}/ffmpeg-core.wasm`, "application/wasm");
-    await ffmpeg.load({coreURL,wasmURL});
-    console.log("✅ FFmpeg 预加载完成");
-  } catch (e) {
-    console.error("❌ FFmpeg 加载失败：", e);
-    $("#errorBox").style.display="block";
-    $("#errorBox").innerText = "视频引擎加载失败，请刷新页面重试";
-  }
-}
-
-// 2. 真实解析PPT：提取【每页图片 + 所有文本】
+// 1. 真实解析PPT：提取【每页图片 + 所有文本】
 async function parsePPTX(file){
   const zip = await JSZip.loadAsync(file);
   const slides = [];
@@ -97,59 +81,79 @@ async function parsePPTX(file){
       }
     }
 
-    let imgBlob = null;
+    let img = null;
     if(imgEntry){
       const arrBuf = await zip.file(imgEntry).async("arraybuffer");
-      imgBlob = new Blob([arrBuf]);
+      const blob = new Blob([arrBuf]);
+      const url = URL.createObjectURL(blob);
+      img = await new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = reject;
+        image.src = url;
+      });
     }
 
     slides.push({
       index:idx,
       text:text.trim()||"无内容",
-      imgBlob
+      img
     });
     idx++;
   }
   return slides;
 }
 
-// 3. 把每页图片转ffmpeg可用文件
-async function prepareSlideAssets(slides){
-  for(let s of slides){
-    if(!s.imgBlob){
-      // 无图：画布生成文字底图
-      const canvas = document.createElement("canvas");
-      canvas.width = 1280;canvas.height=720;
-      const ctx = canvas.getContext("2d");
-      ctx.fillStyle="#ffffff";ctx.fillRect(0,0,1280,720);
-      ctx.fillStyle="#333";ctx.font="36px sans-serif";
-      ctx.fillText(s.text.substring(0,80),40,80);
-      const blob = await new Promise(res=>canvas.toBlob(res,"image/png"));
-      s.imgBlob = blob;
-    }
-    const buf = await s.imgBlob.arrayBuffer();
-    await ffmpeg.writeFile(`slide_${s.index}.png`, new Uint8Array(buf));
+// 2. 绘制单页到Canvas
+function drawSlide(slide){
+  // 清空画布
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // 绘制图片（如果有）
+  if(slide.img){
+    ctx.drawImage(slide.img, 0, 0, canvas.width, canvas.height);
   }
+
+  // 绘制文字
+  ctx.fillStyle = "#333";
+  ctx.font = "bold 48px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(slide.text.substring(0, 40), canvas.width/2, canvas.height/2);
 }
 
-// 4. ffmpeg合成标准MP4
-async function encodeMP4(slides,duration=4){
-  let listStr = "";
-  for(let s of slides){
-    listStr += `file 'slide_${s.index}.png'\nduration ${duration}\n`;
-  }
-  await ffmpeg.writeFile("list.txt",listStr);
+// 3. 用MediaRecorder生成视频
+async function recordVideo(slides, duration=3000){
+  const stream = canvas.captureStream(30);
+  const recorder = new MediaRecorder(stream, {
+    mimeType: "video/webm; codecs=vp9"
+  });
 
-  await ffmpeg.exec([
-    "-f","concat","-safe","0","-i","list.txt",
-    "-vf","fps=24",
-    "-c:v","libx264",
-    "-pix_fmt","yuv420p",
-    "-y","out.mp4"
-  ]);
+  const chunks = [];
+  recorder.ondataavailable = (e) => chunks.push(e.data);
 
-  const data = await ffmpeg.readFile("out.mp4");
-  return new Blob([data],{type:"video/mp4"});
+  return new Promise((resolve) => {
+    recorder.onstop = () => {
+      const blob = new Blob(chunks, { type: "video/webm" });
+      resolve(blob);
+    };
+
+    recorder.start();
+
+    let index = 0;
+    function drawNext(){
+      if(index >= slides.length){
+        recorder.stop();
+        return;
+      }
+
+      drawSlide(slides[index]);
+      index++;
+      setTimeout(drawNext, duration);
+    }
+
+    drawNext();
+  });
 }
 
 // 进度更新
@@ -158,14 +162,10 @@ function setProgress(p,txt){
   $("#statusTxt").innerText = txt;
 }
 
-// 页面加载时预加载ffmpeg
-initFFmpeg();
-
 // 主流程
 $("#startBtn").addEventListener("click",async ()=>{
   const file = $("#pptFile").files[0];
   if(!file) return alert("请选择PPTX文件");
-  if(!ffmpeg) return alert("视频引擎还在加载中，请稍等几秒再试");
 
   $("#progressBox").style.display="block";
   $("#errorBox").style.display="none";
@@ -177,11 +177,8 @@ $("#startBtn").addEventListener("click",async ()=>{
     const slides = await parsePPTX(file);
     if(!slides.length) throw new Error("未读取到幻灯片");
 
-    setProgress(35,"预处理每页素材...");
-    await prepareSlideAssets(slides);
-
-    setProgress(50,"合成标准MP4视频...");
-    const videoBlob = await encodeMP4(slides,4);
+    setProgress(50,"生成视频...");
+    const videoBlob = await recordVideo(slides, 3000);
 
     setProgress(100,"生成完成");
     const url = URL.createObjectURL(videoBlob);
