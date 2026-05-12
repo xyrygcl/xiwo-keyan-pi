@@ -2,43 +2,50 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>PPT生成微课｜Vercel Python</title>
+<title>PPT生成微课</title>
+<style>
+body { max-width: 600px; margin: 50px auto; padding: 20px; font-family: sans-serif; }
+button { padding: 10px 20px; background: #2196f3; color: white; border: none; border-radius: 4px; cursor: pointer; }
+input { margin: 10px 0; }
+#status { margin: 20px 0; padding: 10px; background: #f5f5f5; border-radius: 4px; }
+</style>
 </head>
 <body>
+<h1>PPT转微课工具</h1>
 <input type="file" id="pptFile" accept=".pptx">
-<button id="startBtn">生成视频</button>
-<div id="status"></div>
-<a id="downloadBtn" style="display:none">下载视频</a>
+<button id="startBtn">开始生成视频</button>
+<div id="status">等待上传...</div>
+<a id="downloadBtn" style="display:none; padding: 10px; background: #4caf50; color: white; text-decoration: none; border-radius: 4px;">下载生成的视频</a>
 
 <script>
 document.getElementById("startBtn").addEventListener("click", async () => {
   const file = document.getElementById("pptFile").files[0];
-  if (!file) return alert("请选PPT文件");
+  if (!file) return alert("请先选择PPT文件");
 
   const status = document.getElementById("status");
-  status.innerText = "上传并生成中（最多90秒）...";
+  status.innerText = "正在上传并生成视频，请稍候...";
 
-  const res = await fetch("/api/generate", {
-    method: "POST",
-    body: file
-  });
+  const formData = new FormData();
+  formData.append("ppt", file);
 
-  const data = await res.json();
-  if (data.error) {
-    status.innerText = "失败：" + data.error;
-    return;
+  try {
+    const res = await fetch("/api/generate", {
+      method: "POST",
+      body: formData
+    });
+
+    if (!res.ok) throw new Error("生成失败");
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    
+    document.getElementById("downloadBtn").href = url;
+    document.getElementById("downloadBtn").download = "微课视频.mp4";
+    document.getElementById("downloadBtn").style.display = "inline-block";
+    status.innerText = "生成成功！点击下面的按钮下载视频";
+  } catch (e) {
+    status.innerText = "出错了：" + e.message;
   }
-
-  const blob = new Blob(
-    [Uint8Array.from(atob(data.video), c => c.charCodeAt(0))],
-    { type: "video/mp4" }
-  );
-  const url = URL.createObjectURL(blob);
-  document.getElementById("downloadBtn").href = url;
-  document.getElementById("downloadBtn").download = "微课.mp4";
-  document.getElementById("downloadBtn").style.display = "block";
-  document.getElementById("downloadBtn").innerText = "下载视频";
-  status.innerText = "生成成功！";
 });
 </script>
 </body>
