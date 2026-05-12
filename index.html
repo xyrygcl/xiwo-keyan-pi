@@ -1,229 +1,45 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html>
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PPT微课生成器｜永不卡死版</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#222831;color:#eee;padding:20px;font-family:system-ui}
-.container{max-width:600px;margin:0 auto}
-h1{text-align:center;margin-bottom:20px;color:#00adb5}
-.upload-box{border:2px dashed #00adb5;padding:30px;text-align:center;border-radius:12px;margin-bottom:20px}
-input[type=file]{margin:10px 0}
-button{background:#00adb5;border:none;color:#fff;padding:12px 24px;border-radius:8px;cursor:pointer;margin:8px 0}
-button:disabled{background:#555;cursor:not-allowed}
-.progress{margin:15px 0;display:none}
-.bar{height:8px;background:#333;border-radius:4px;overflow:hidden}
-.fill{height:100%;width:0;background:#00adb5;transition:.2s}
-.status{margin-top:8px;font-size:14px;color:#aaa}
-.error{color:#f56;margin-top:10px;display:none}
-.result{margin-top:15px;display:none}
-a{color:#00adb5}
-#canvas{display:none}
-</style>
+<meta charset="UTF-8">
+<title>PPT生成微课｜Vercel Python</title>
 </head>
 <body>
-<div class="container">
-  <h1>PPT微课生成器｜永不卡死版</h1>
-  <div class="upload-box">
-    <p>上传 .pptx 文件</p>
-    <input type="file" id="pptFile" accept=".pptx"/>
-    <br/>
-    <button id="startBtn">开始生成微课视频</button>
-  </div>
+<input type="file" id="pptFile" accept=".pptx">
+<button id="startBtn">生成视频</button>
+<div id="status"></div>
+<a id="downloadBtn" style="display:none">下载视频</a>
 
-  <div class="progress" id="progressBox">
-    <div class="bar"><div class="fill" id="progressFill"></div></div>
-    <div class="status" id="statusTxt">准备中...</div>
-  </div>
+<script>
+document.getElementById("startBtn").addEventListener("click", async () => {
+  const file = document.getElementById("pptFile").files[0];
+  if (!file) return alert("请选PPT文件");
 
-  <div class="error" id="errorBox"></div>
-  <div class="result" id="resBox">
-    <p>✅ 视频生成完成</p>
-    <a href="" id="downLink" download="微课视频.webm">下载视频</a>
-  </div>
-</div>
+  const status = document.getElementById("status");
+  status.innerText = "上传并生成中（最多90秒）...";
 
-<canvas id="canvas" width="1280" height="720"></canvas>
-
-<script type="module">
-import JSZip from "https://esm.sh/jszip@3.10.1";
-
-const $ = s=>document.querySelector(s);
-const canvas = $("#canvas");
-const ctx = canvas.getContext("2d");
-
-// 1. 解析PPT，提取每页图片和句子
-async function parsePPTX(file){
-  const zip = await JSZip.loadAsync(file);
-  const slides = [];
-  let slideIndex = 1;
-
-  while(true){
-    const slideXmlPath = `ppt/slides/slide${slideIndex}.xml`;
-    const slideFile = zip.file(slideXmlPath);
-    if(!slideFile) break;
-
-    const xmlTxt = await slideFile.async("text");
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(xmlTxt, "text/xml");
-    const textNodes = xmlDoc.getElementsByTagName("a:t");
-    let fullText = "";
-    for(let t of textNodes) fullText += t.textContent.trim() + " ";
-
-    // 按标点拆分句子
-    const sentences = fullText
-      .replace(/\s+/g, " ")
-      .trim()
-      .split(/[，。、！？]/)
-      .filter(s => s.trim())
-      .map(s => s.trim());
-
-    // 提取PPT图片
-    let img = null;
-    const allFiles = Object.keys(zip.files);
-    for(let f of allFiles){
-      if(f.match(/ppt\/media\/image.*\.(png|jpg|jpeg)/)){
-        const arrBuf = await zip.file(f).async("arraybuffer");
-        const blob = new Blob([arrBuf]);
-        const url = URL.createObjectURL(blob);
-        img = await new Promise((resolve) => {
-          const image = new Image();
-          image.onload = () => resolve(image);
-          image.src = url;
-        });
-        break;
-      }
-    }
-
-    slides.push({
-      index: slideIndex,
-      sentences: sentences.length ? sentences : [`第${slideIndex}页`],
-      img: img
-    });
-    slideIndex++;
-  }
-  return slides;
-}
-
-// 2. 绘制固定帧（不再依赖语音回调）
-function drawSlideFrame(slide, sentence){
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  if(slide.img){
-    const imgRatio = slide.img.width / slide.img.height;
-    const canvasRatio = canvas.width / canvas.height;
-    let drawW, drawH, drawX, drawY;
-    if(imgRatio > canvasRatio){
-      drawW = canvas.width;
-      drawH = canvas.width / imgRatio;
-      drawX = 0;
-      drawY = (canvas.height - drawH) / 2;
-    } else {
-      drawH = canvas.height;
-      drawW = canvas.height * imgRatio;
-      drawX = (canvas.width - drawW) / 2;
-      drawY = 0;
-    }
-    ctx.drawImage(slide.img, drawX, drawY, drawW, drawH);
-  }
-
-  // 单行字幕
-  const subtitleY = canvas.height - 60;
-  ctx.fillStyle = "rgba(0,0,0,0.7)";
-  ctx.fillRect(0, subtitleY - 20, canvas.width, 80);
-
-  ctx.fillStyle = "#ffffff";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = "bold 36px system-ui, sans-serif";
-  ctx.fillText(sentence, canvas.width / 2, subtitleY + 20);
-}
-
-// 3. 固定时长录制，全程不中断
-async function recordStableVideo(slides, sentenceDuration=2500){
-  const stream = canvas.captureStream(30);
-  const recorder = new MediaRecorder(stream, {
-    mimeType: "video/webm; codecs=vp9"
+  const res = await fetch("/api/generate", {
+    method: "POST",
+    body: file
   });
 
-  const chunks = [];
-  recorder.ondataavailable = (e) => chunks.push(e.data);
-
-  return new Promise((resolve) => {
-    recorder.onstop = () => {
-      const blob = new Blob(chunks, { type: "video/webm" });
-      resolve(blob);
-    };
-
-    recorder.start();
-
-    let slideIdx = 0;
-    let sentenceIdx = 0;
-
-    function drawNext(){
-      if(slideIdx >= slides.length){
-        recorder.stop();
-        return;
-      }
-
-      const slide = slides[slideIdx];
-      const sentence = slide.sentences[sentenceIdx];
-
-      drawSlideFrame(slide, sentence);
-
-      sentenceIdx++;
-      if(sentenceIdx >= slide.sentences.length){
-        sentenceIdx = 0;
-        slideIdx++;
-      }
-
-      setTimeout(drawNext, sentenceDuration);
-    }
-
-    drawNext();
-  });
-}
-
-// 进度条更新
-function setProgress(percent, text){
-  $("#progressFill").style.width = `${percent}%`;
-  $("#statusTxt").innerText = text;
-}
-
-// 主流程
-$("#startBtn").addEventListener("click", async () => {
-  const file = $("#pptFile").files[0];
-  if(!file) return alert("请先选择PPT文件");
-
-  $("#progressBox").style.display = "block";
-  $("#errorBox").style.display = "none";
-  $("#resBox").style.display = "none";
-  $("#startBtn").disabled = true;
-
-  try{
-    setProgress(10, "正在解析PPT，提取图文...");
-    const slides = await parsePPTX(file);
-    if(slides.length === 0) throw new Error("未解析到任何幻灯片");
-
-    setProgress(50, `解析完成，共${slides.length}页，正在录制稳定视频...`);
-    const videoBlob = await recordStableVideo(slides, 2500);
-
-    setProgress(100, "生成完成！");
-    const url = URL.createObjectURL(videoBlob);
-    $("#downLink").href = url;
-    $("#resBox").style.display = "block";
-  } catch(err){
-    $("#errorBox").style.display = "block";
-    $("#errorBox").innerText = `生成失败：${err.message}`;
-    console.error(err);
-  } finally {
-    $("#startBtn").disabled = false;
+  const data = await res.json();
+  if (data.error) {
+    status.innerText = "失败：" + data.error;
+    return;
   }
+
+  const blob = new Blob(
+    [Uint8Array.from(atob(data.video), c => c.charCodeAt(0))],
+    { type: "video/mp4" }
+  );
+  const url = URL.createObjectURL(blob);
+  document.getElementById("downloadBtn").href = url;
+  document.getElementById("downloadBtn").download = "微课.mp4";
+  document.getElementById("downloadBtn").style.display = "block";
+  document.getElementById("downloadBtn").innerText = "下载视频";
+  status.innerText = "生成成功！";
 });
 </script>
 </body>
 </html>
-
