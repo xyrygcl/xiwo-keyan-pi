@@ -1,0 +1,10 @@
+{
+  "buildCommand": "pip install ffmpeg-python",
+  "installCommand": "pip install ffmpeg-python",
+  "functions": {
+    "api/**": {
+      "runtime": "python3.11",
+      "maxDuration": 90
+    }
+  }
+}
