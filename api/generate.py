@@ -1,4 +1,4 @@
-ifrom fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import FileResponse
 import os
 import json
