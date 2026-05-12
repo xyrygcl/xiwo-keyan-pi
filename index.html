@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PPT微课生成器｜音画字完全同步</title>
+<title>PPT微课生成器｜永不卡死版</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#222831;color:#eee;padding:20px;font-family:system-ui}
@@ -25,7 +25,7 @@ a{color:#00adb5}
 </head>
 <body>
 <div class="container">
-  <h1>PPT微课生成器｜音画字完全同步</h1>
+  <h1>PPT微课生成器｜永不卡死版</h1>
   <div class="upload-box">
     <p>上传 .pptx 文件</p>
     <input type="file" id="pptFile" accept=".pptx"/>
@@ -54,7 +54,7 @@ const $ = s=>document.querySelector(s);
 const canvas = $("#canvas");
 const ctx = canvas.getContext("2d");
 
-// 1. 解析PPT：提取每页图片和完整文本，并按标点拆分句子
+// 1. 解析PPT，提取每页图片和句子
 async function parsePPTX(file){
   const zip = await JSZip.loadAsync(file);
   const slides = [];
@@ -65,17 +65,14 @@ async function parsePPTX(file){
     const slideFile = zip.file(slideXmlPath);
     if(!slideFile) break;
 
-    // 解析文本并按标点拆分句子
     const xmlTxt = await slideFile.async("text");
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(xmlTxt, "text/xml");
     const textNodes = xmlDoc.getElementsByTagName("a:t");
     let fullText = "";
-    for(let t of textNodes) {
-      fullText += t.textContent.trim() + " ";
-    }
+    for(let t of textNodes) fullText += t.textContent.trim() + " ";
 
-    // 按逗号、句号、顿号拆分句子
+    // 按标点拆分句子
     const sentences = fullText
       .replace(/\s+/g, " ")
       .trim()
@@ -110,14 +107,12 @@ async function parsePPTX(file){
   return slides;
 }
 
-// 2. 绘制单页PPT画面 + 单行字幕
-function drawSlideWithSubtitle(slide, sentence){
-  // 1. 绘制PPT背景（无图则用白色背景）
+// 2. 绘制固定帧（不再依赖语音回调）
+function drawSlideFrame(slide, sentence){
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   if(slide.img){
-    // 按比例缩放PPT图片，居中显示
     const imgRatio = slide.img.width / slide.img.height;
     const canvasRatio = canvas.width / canvas.height;
     let drawW, drawH, drawX, drawY;
@@ -135,7 +130,7 @@ function drawSlideWithSubtitle(slide, sentence){
     ctx.drawImage(slide.img, drawX, drawY, drawW, drawH);
   }
 
-  // 2. 绘制单行字幕（底部居中，半透明黑底）
+  // 单行字幕
   const subtitleY = canvas.height - 60;
   ctx.fillStyle = "rgba(0,0,0,0.7)";
   ctx.fillRect(0, subtitleY - 20, canvas.width, 80);
@@ -147,8 +142,8 @@ function drawSlideWithSubtitle(slide, sentence){
   ctx.fillText(sentence, canvas.width / 2, subtitleY + 20);
 }
 
-// 3. 录制视频：音画字完全同步
-async function recordSyncedVideo(slides){
+// 3. 固定时长录制，全程不中断
+async function recordStableVideo(slides, sentenceDuration=2500){
   const stream = canvas.captureStream(30);
   const recorder = new MediaRecorder(stream, {
     mimeType: "video/webm; codecs=vp9"
@@ -165,11 +160,10 @@ async function recordSyncedVideo(slides){
 
     recorder.start();
 
-    // 逐句播放语音，同步切换画面和字幕
     let slideIdx = 0;
     let sentenceIdx = 0;
 
-    function next(){
+    function drawNext(){
       if(slideIdx >= slides.length){
         recorder.stop();
         return;
@@ -178,25 +172,18 @@ async function recordSyncedVideo(slides){
       const slide = slides[slideIdx];
       const sentence = slide.sentences[sentenceIdx];
 
-      // 绘制当前句的字幕和PPT画面
-      drawSlideWithSubtitle(slide, sentence);
+      drawSlideFrame(slide, sentence);
 
-      // 播放语音
-      const utterance = new SpeechSynthesisUtterance(sentence);
-      utterance.lang = "zh-CN";
-      utterance.rate = 1.0;
-      utterance.onend = () => {
-        sentenceIdx++;
-        if(sentenceIdx >= slide.sentences.length){
-          sentenceIdx = 0;
-          slideIdx++;
-        }
-        next();
-      };
-      speechSynthesis.speak(utterance);
+      sentenceIdx++;
+      if(sentenceIdx >= slide.sentences.length){
+        sentenceIdx = 0;
+        slideIdx++;
+      }
+
+      setTimeout(drawNext, sentenceDuration);
     }
 
-    next();
+    drawNext();
   });
 }
 
@@ -221,8 +208,8 @@ $("#startBtn").addEventListener("click", async () => {
     const slides = await parsePPTX(file);
     if(slides.length === 0) throw new Error("未解析到任何幻灯片");
 
-    setProgress(50, `解析完成，共${slides.length}页，正在生成同步微课...`);
-    const videoBlob = await recordSyncedVideo(slides);
+    setProgress(50, `解析完成，共${slides.length}页，正在录制稳定视频...`);
+    const videoBlob = await recordStableVideo(slides, 2500);
 
     setProgress(100, "生成完成！");
     const url = URL.createObjectURL(videoBlob);
@@ -239,3 +226,4 @@ $("#startBtn").addEventListener("click", async () => {
 </script>
 </body>
 </html>
+
