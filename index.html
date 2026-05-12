@@ -54,14 +54,21 @@ const $ = s=>document.querySelector(s);
 let ffmpeg = null;
 let slideList = [];
 
-// 1. 加载ffmpeg
-async function loadFFmpeg(){
+// 页面加载时自动预加载ffmpeg
+async function initFFmpeg(){
   if(ffmpeg) return;
-  ffmpeg = new FFmpeg();
-  const base = "https://esm.sh/@ffmpeg/core@0.12.0/dist/umd";
-  const coreURL = await toBlobURL(`${base}/ffmpeg-core.js`, "text/javascript");
-  const wasmURL = await toBlobURL(`${base}/ffmpeg-core.wasm`, "application/wasm");
-  await ffmpeg.load({coreURL,wasmURL});
+  try {
+    ffmpeg = new FFmpeg();
+    const base = "https://esm.sh/@ffmpeg/core@0.12.0/dist/umd";
+    const coreURL = await toBlobURL(`${base}/ffmpeg-core.js`, "text/javascript");
+    const wasmURL = await toBlobURL(`${base}/ffmpeg-core.wasm`, "application/wasm");
+    await ffmpeg.load({coreURL,wasmURL});
+    console.log("✅ FFmpeg 预加载完成");
+  } catch (e) {
+    console.error("❌ FFmpeg 加载失败：", e);
+    $("#errorBox").style.display="block";
+    $("#errorBox").innerText = "视频引擎加载失败，请刷新页面重试";
+  }
 }
 
 // 2. 真实解析PPT：提取【每页图片 + 所有文本】
@@ -152,10 +159,14 @@ function setProgress(p,txt){
   $("#statusTxt").innerText = txt;
 }
 
+// 页面加载时预加载ffmpeg
+initFFmpeg();
+
 // 主流程
 $("#startBtn").addEventListener("click",async ()=>{
   const file = $("#pptFile").files[0];
   if(!file) return alert("请选择PPTX文件");
+  if(!ffmpeg) return alert("视频引擎还在加载中，请稍等几秒再试");
 
   $("#progressBox").style.display="block";
   $("#errorBox").style.display="none";
@@ -163,10 +174,7 @@ $("#startBtn").addEventListener("click",async ()=>{
   $("#startBtn").disabled=true;
 
   try{
-    setProgress(5,"加载视频引擎...");
-    await loadFFmpeg();
-
-    setProgress(15,"解析PPT：提取图文...");
+    setProgress(10,"解析PPT：提取图文...");
     const slides = await parsePPTX(file);
     if(!slides.length) throw new Error("未读取到幻灯片");
 
