@@ -1,0 +1,9 @@
+{
+  "builds": [
+    {
+      "src": "api/generate.py",
+      "use": "@vercel/python",
+      "config": { "maxDuration": 90 }
+    }
+  ]
+}
