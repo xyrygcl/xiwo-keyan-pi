@@ -1,7 +1,11 @@
 {
-  "functions": {
-    "api/generate.py": {
-      "runtime": "python3.11"
+  "builds": [
+    {
+      "src": "api/generate.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxDuration": 90
+      }
     }
-  }
+  ]
 }
