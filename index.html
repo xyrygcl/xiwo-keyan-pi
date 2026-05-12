@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>PPT生成微课｜Vercel Python</title>
+</head>
+<body>
+<input type="file" id="pptFile" accept=".pptx">
+<button id="startBtn">生成视频</button>
+<div id="status"></div>
+<a id="downloadBtn" style="display:none">下载视频</a>
+
+<script>
+document.getElementById("startBtn").addEventListener("click", async () => {
+  const file = document.getElementById("pptFile").files[0];
+  if (!file) return alert("请选PPT文件");
+
+  const status = document.getElementById("status");
+  status.innerText = "上传并生成中（最多90秒）...";
+
+  const res = await fetch("/api/generate", {
+    method: "POST",
+    body: file
+  });
+
+  const data = await res.json();
+  if (data.error) {
+    status.innerText = "失败：" + data.error;
+    return;
+  }
+
+  const blob = new Blob(
+    [Uint8Array.from(atob(data.video), c => c.charCodeAt(0))],
+    { type: "video/mp4" }
+  );
+  const url = URL.createObjectURL(blob);
+  document.getElementById("downloadBtn").href = url;
+  document.getElementById("downloadBtn").download = "微课.mp4";
+  document.getElementById("downloadBtn").style.display = "block";
+  document.getElementById("downloadBtn").innerText = "下载视频";
+  status.innerText = "生成成功！";
+});
+</script>
+</body>
+</html>
