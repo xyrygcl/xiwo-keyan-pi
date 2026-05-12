@@ -21,4 +21,4 @@ COPY . .
 EXPOSE 8080
 
 # 启动后端服务
-CMD ["uvicorn", "api.generate:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["sh", "-c", "uvicorn api.generate:app --host 0.0.0.0 --port $PORT"]
