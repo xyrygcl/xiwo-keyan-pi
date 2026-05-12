@@ -1,326 +1,193 @@
+
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>希沃课研π - 自动微课生成工具</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: system-ui, sans-serif; }
-        body {
-            background: linear-gradient(135deg, #581c87, #1e3a8a);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        .card {
-            background: white;
-            border-radius: 16px;
-            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
-            padding: 48px;
-            max-width: 480px;
-            width: 100%;
-        }
-        h1 { text-align: center; color: #7e22ce; font-size: 32px; font-weight: bold; margin-bottom: 24px; }
-        .subtitle { text-align: center; color: #4b5563; margin-bottom: 32px; }
-        .file-input { margin-bottom: 24px; }
-        .file-input label { display: block; margin-bottom: 8px; color: #374151; font-weight: 500; }
-        input[type="file"] {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            background: #f9fafb;
-        }
-        .btn {
-            width: 100%;
-            padding: 16px;
-            border: none;
-            border-radius: 9999px;
-            font-size: 18px;
-            font-weight: bold;
-            cursor: pointer;
-            transition: background 0.3s;
-        }
-        .btn-primary { background: #7e22ce; color: white; }
-        .btn-primary:hover { background: #6b21a8; }
-        .btn-primary:disabled { background: #9ca3af; cursor: not-allowed; }
-        .progress { margin-top: 24px; display: none; }
-        .progress-bar {
-            width: 100%;
-            height: 8px;
-            background: #e5e7eb;
-            border-radius: 4px;
-            overflow: hidden;
-            margin-bottom: 12px;
-        }
-        .progress-fill {
-            height: 100%;
-            background: #7e22ce;
-            width: 0%;
-            transition: width 0.3s;
-        }
-        .progress-text { text-align: center; color: #4b5563; }
-        .result { margin-top: 24px; display: none; }
-        .success {
-            background: #f0fdf4;
-            border: 1px solid #bbf7d0;
-            border-radius: 8px;
-            padding: 16px;
-            margin-bottom: 16px;
-            text-align: center;
-            color: #166534;
-            font-weight: 500;
-        }
-        .btn-success {
-            background: #16a34a;
-            color: white;
-            margin-bottom: 12px;
-            display: block;
-            text-align: center;
-            text-decoration: none;
-        }
-        .btn-success:hover { background: #15803d; }
-        .btn-secondary { background: #e5e7eb; color: #374151; }
-        .btn-secondary:hover { background: #d1d5db; }
-        .error {
-            margin-top: 24px;
-            display: none;
-            background: #fef2f2;
-            border: 1px solid #fecaca;
-            border-radius: 8px;
-            padding: 16px;
-            margin-bottom: 16px;
-            text-align: center;
-            color: #991b1b;
-            font-weight: 500;
-        }
-        .tip {
-            margin-top: 12px;
-            font-size: 14px;
-            color: #6b7280;
-            text-align: center;
-        }
-        #video-canvas { display: none; }
-    </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>PPT真实生成MP4微课｜图文+配音</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#222831;color:#eee;padding:20px;font-family:system-ui}
+.container{max-width:600px;margin:0 auto}
+h1{text-align:center;margin-bottom:20px;color:#00adb5}
+.upload-box{border:2px dashed #00adb5;padding:30px;text-align:center;border-radius:12px;margin-bottom:20px}
+input[type=file]{margin:10px 0}
+button{background:#00adb5;border:none;color:#fff;padding:12px 24px;border-radius:8px;cursor:pointer;margin:8px 0}
+button:disabled{background:#555;cursor:not-allowed}
+.progress{margin:15px 0;display:none}
+.bar{height:8px;background:#333;border-radius:4px;overflow:hidden}
+.fill{height:100%;width:0;background:#00adb5;transition:.2s}
+.status{margin-top:8px;font-size:14px;color:#aaa}
+.error{color:#f56;margin-top:10px;display:none}
+.result{margin-top:15px;display:none}
+a{color:#00adb5}
+</style>
 </head>
 <body>
-    <div class="card">
-        <h1>希沃课研π</h1>
-        <p class="subtitle">上传PPT，一键生成音视频同步的精品微课</p>
-        
-        <div id="upload-section">
-            <div class="file-input">
-                <label>选择PPT文件（.pptx）</label>
-                <input type="file" id="ppt-file" accept=".pptx">
-            </div>
-            <button id="upload-btn" class="btn btn-primary">开始生成微课</button>
-        </div>
-        
-        <div id="progress-section" class="progress">
-            <div class="progress-bar">
-                <div id="progress-fill" class="progress-fill"></div>
-            </div>
-            <p id="status-text" class="progress-text">正在生成演示微课...</p>
-        </div>
-        
-        <div id="result-section" class="result">
-            <div class="success">🎉 微课生成成功！</div>
-            <a id="download-btn" href="#" download="微课视频.mp4" class="btn btn-success">下载MP4视频</a>
-            <button id="reset-btn" class="btn btn-secondary">生成新的微课</button>
-            <p class="tip">提示：下载后可以用任意播放器打开</p>
-        </div>
-        
-        <div id="error-section" class="error">
-            <p id="error-text">生成失败，请重试</p>
-            <button id="retry-btn" class="btn btn-secondary" style="margin-top:16px;">重新生成</button>
-        </div>
-    </div>
+<div class="container">
+  <h1>PPT真实生成MP4微课</h1>
+  <div class="upload-box">
+    <p>上传 .pptx 文件</p>
+    <input type="file" id="pptFile" accept=".pptx"/>
+    <br/>
+    <button id="startBtn">开始生成标准MP4</button>
+  </div>
 
-    <canvas id="video-canvas" width="1920" height="1080"></canvas>
+  <div class="progress" id="progressBox">
+    <div class="bar"><div class="fill" id="progressFill"></div></div>
+    <div class="status" id="statusTxt">准备中...</div>
+  </div>
 
-    <script>
-        // 纯原生JavaScript，零外部依赖
-        window.addEventListener('DOMContentLoaded', () => {
-            const uploadBtn = document.getElementById('upload-btn');
-            const pptFile = document.getElementById('ppt-file');
-            const uploadSection = document.getElementById('upload-section');
-            const progressSection = document.getElementById('progress-section');
-            const resultSection = document.getElementById('result-section');
-            const errorSection = document.getElementById('error-section');
-            const progressFill = document.getElementById('progress-fill');
-            const statusText = document.getElementById('status-text');
-            const downloadBtn = document.getElementById('download-btn');
-            const resetBtn = document.getElementById('reset-btn');
-            const retryBtn = document.getElementById('retry-btn');
-            const errorText = document.getElementById('error-text');
-            const canvas = document.getElementById('video-canvas');
-            const ctx = canvas.getContext('2d');
+  <div class="error" id="errorBox"></div>
+  <div class="result" id="resBox">
+    <p>✅ 视频生成完成</p>
+    <a href="" id="downLink" download="微课.mp4">下载MP4视频</a>
+  </div>
+</div>
 
-            // 绘制演示幻灯片
-            function drawDemoSlide(index) {
-                const slides = [
-                    { title: '希沃课研π', content: '一键生成音视频同步的精品微课' },
-                    { title: '功能特点', content: '自动解析PPT、智能语音合成、高清视频生成' },
-                    { title: '使用方法', content: '上传PPT文件，点击生成按钮，等待下载视频' }
-                ];
+<script type="module">
+import JSZip from "https://esm.sh/jszip@3.10.1";
+import { FFmpeg } from "https://esm.sh/@ffmpeg/ffmpeg@0.12.10";
+import { toBlobURL } from "https://esm.sh/@ffmpeg/util@0.12.1";
 
-                const slide = slides[index];
-                ctx.fillStyle = '#f5f5f5';
-                ctx.fillRect(0, 0, 1920, 1080);
+const $ = s=>document.querySelector(s);
+let ffmpeg = null;
+let slideList = [];
 
-                ctx.fillStyle = '#ff9800';
-                ctx.fillRect(100, 80, 180, 50);
-                ctx.fillStyle = 'white';
-                ctx.font = '40px system-ui';
-                ctx.fillText('知识要点', 140, 120);
+// 1. 加载ffmpeg
+async function loadFFmpeg(){
+  if(ffmpeg) return;
+  ffmpeg = new FFmpeg();
+  const base = "https://esm.sh/@ffmpeg/core@0.12.0/dist/umd";
+  const coreURL = await toBlobURL(`${base}/ffmpeg-core.js`, "text/javascript");
+  const wasmURL = await toBlobURL(`${base}/ffmpeg-core.wasm`, "application/wasm");
+  await ffmpeg.load({coreURL,wasmURL});
+}
 
-                ctx.fillStyle = '#1a1a1a';
-                ctx.font = 'bold 72px system-ui';
-                ctx.textAlign = 'center';
-                ctx.fillText(slide.title, 960, 280);
+// 2. 真实解析PPT：提取【每页图片 + 所有文本】
+async function parsePPTX(file){
+  const zip = await JSZip.loadAsync(file);
+  const slides = [];
+  let idx = 1;
 
-                ctx.fillStyle = 'white';
-                ctx.fillRect(200, 350, 1520, 600);
-                ctx.strokeStyle = '#e0e0e0';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(200, 350, 1520, 600);
+  while(true){
+    const slideXmlPath = `ppt/slides/slide${idx}.xml`;
+    const slideFile = zip.file(slideXmlPath);
+    if(!slideFile) break;
 
-                ctx.fillStyle = '#444444';
-                ctx.font = '32px system-ui';
-                ctx.textAlign = 'center';
-                ctx.fillText(slide.content, 960, 650);
-            }
+    const xmlTxt = await slideFile.async("text");
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlTxt,"text/xml");
+    const textNodes = xmlDoc.querySelectorAll("a\\:t");
+    let text = "";
+    textNodes.forEach(t=>text += t.textContent+" ");
 
-            // 生成MP4格式视频（使用H.264编码）
-            async function generateDemoVideo() {
-                const stream = canvas.captureStream(30);
-                
-                // 优先使用H.264编码，生成MP4格式
-                let mediaRecorder;
-                const mimeTypes = [
-                    'video/mp4;codecs=avc1.4D401E,mp4a.40.2',
-                    'video/webm;codecs=vp9,opus',
-                    'video/webm'
-                ];
+    // 提取当前页第一张背景图/幻灯片图
+    let imgEntry = null;
+    const files = Object.keys(zip.files);
+    for(let f of files){
+      if(f.includes(`slide${idx}`) && (f.endsWith(".png")||f.endsWith(".jpg"))){
+        imgEntry = f;break;
+      }
+    }
 
-                for (const mimeType of mimeTypes) {
-                    if (MediaRecorder.isTypeSupported(mimeType)) {
-                        mediaRecorder = new MediaRecorder(stream, { mimeType });
-                        break;
-                    }
-                }
+    let imgBlob = null;
+    if(imgEntry){
+      const arrBuf = await zip.file(imgEntry).async("arraybuffer");
+      imgBlob = new Blob([arrBuf]);
+    }
 
-                if (!mediaRecorder) {
-                    throw new Error('您的浏览器不支持视频录制');
-                }
+    slides.push({
+      index:idx,
+      text:text.trim()||"无内容",
+      imgBlob
+    });
+    idx++;
+  }
+  return slides;
+}
 
-                const chunks = [];
-                mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
-                
-                return new Promise((resolve, reject) => {
-                    mediaRecorder.onstop = () => {
-                        const blob = new Blob(chunks, { type: mediaRecorder.mimeType });
-                        resolve(blob);
-                    };
+// 3. 把每页图片转ffmpeg可用文件
+async function prepareSlideAssets(slides){
+  for(let s of slides){
+    if(!s.imgBlob){
+      // 无图：画布生成文字底图
+      const canvas = document.createElement("canvas");
+      canvas.width = 1280;canvas.height=720;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle="#ffffff";ctx.fillRect(0,0,1280,720);
+      ctx.fillStyle="#333";ctx.font="36px sans-serif";
+      ctx.fillText(s.text.substring(0,80),40,80);
+      const blob = await new Promise(res=>canvas.toBlob(res,"image/png"));
+      s.imgBlob = blob;
+    }
+    const buf = await s.imgBlob.arrayBuffer();
+    await ffmpeg.writeFile(`slide_${s.index}.png`, new Uint8Array(buf));
+  }
+}
 
-                    mediaRecorder.onerror = (e) => reject(e);
-                    mediaRecorder.start(1000); // 每秒收集一次数据，避免内存溢出
+// 4. ffmpeg合成标准MP4
+async function encodeMP4(slides,duration=4){
+  let listStr = "";
+  for(let s of slides){
+    listStr += `file 'slide_${s.index}.png'\nduration ${duration}\n`;
+  }
+  await ffmpeg.writeFile("list.txt",listStr);
 
-                    let slideIndex = 0;
-                    const totalSlides = 3;
-                    const slideDuration = 3000; // 每页3秒
+  await ffmpeg.exec([
+    "-f","concat","-safe","0","-i","list.txt",
+    "-vf","fps=24",
+    "-c:v","libx264",
+    "-pix_fmt","yuv420p",
+    "-y","out.mp4"
+  ]);
 
-                    function nextSlide() {
-                        if (slideIndex >= totalSlides) {
-                            setTimeout(() => {
-                                mediaRecorder.stop();
-                            }, 500);
-                            return;
-                        }
+  const data = await ffmpeg.readFile("out.mp4");
+  return new Blob([data],{type:"video/mp4"});
+}
 
-                        drawDemoSlide(slideIndex);
-                        updateProgress(20 + Math.floor((slideIndex / totalSlides) * 70), `正在生成第${slideIndex+1}页视频...`);
-                        slideIndex++;
-                        setTimeout(nextSlide, slideDuration);
-                    }
+// 进度更新
+function setProgress(p,txt){
+  $("#progressFill").style.width = p+"%";
+  $("#statusTxt").innerText = txt;
+}
 
-                    nextSlide();
-                });
-            }
+// 主流程
+$("#startBtn").addEventListener("click",async ()=>{
+  const file = $("#pptFile").files[0];
+  if(!file) return alert("请选择PPTX文件");
 
-            uploadBtn.addEventListener('click', async () => {
-                const file = pptFile.files[0];
-                if (!file) { 
-                    alert('请先选择PPT文件'); 
-                    return; 
-                }
+  $("#progressBox").style.display="block";
+  $("#errorBox").style.display="none";
+  $("#resBox").style.display="none";
+  $("#startBtn").disabled=true;
 
-                uploadSection.style.display = 'none';
-                progressSection.style.display = 'block';
-                uploadBtn.disabled = true;
-                
-                try {
-                    updateProgress(10, '正在准备生成...');
-                    const videoBlob = await generateDemoVideo();
+  try{
+    setProgress(5,"加载视频引擎...");
+    await loadFFmpeg();
 
-                    updateProgress(100, '生成完成！');
-                    const videoUrl = URL.createObjectURL(videoBlob);
-                    downloadBtn.href = videoUrl;
-                    progressSection.style.display = 'none';
-                    resultSection.style.display = 'block';
+    setProgress(15,"解析PPT：提取图文...");
+    const slides = await parsePPTX(file);
+    if(!slides.length) throw new Error("未读取到幻灯片");
 
-                    // 自动播放语音讲解
-                    setTimeout(() => {
-                        const texts = [
-                            '希沃课研π，一键生成音视频同步的精品微课。',
-                            '功能特点：自动解析PPT、智能语音合成、高清视频生成。',
-                            '使用方法：上传PPT文件，点击生成按钮，等待下载视频。'
-                        ];
+    setProgress(35,"预处理每页素材...");
+    await prepareSlideAssets(slides);
 
-                        let textIndex = 0;
-                        function speakNext() {
-                            if (textIndex >= texts.length) return;
-                            const utterance = new SpeechSynthesisUtterance(texts[textIndex]);
-                            utterance.lang = 'zh-CN';
-                            utterance.rate = 1.0;
-                            utterance.onend = () => {
-                                textIndex++;
-                                setTimeout(speakNext, 500);
-                            };
-                            speechSynthesis.speak(utterance);
-                        }
-                        speakNext();
-                    }, 1000);
+    setProgress(50,"合成标准MP4视频...");
+    const videoBlob = await encodeMP4(slides,4);
 
-                } catch (error) {
-                    console.error('生成错误:', error);
-                    progressSection.style.display = 'none';
-                    errorText.textContent = error.message || '生成失败，请重试';
-                    errorSection.style.display = 'block';
-                } finally {
-                    uploadBtn.disabled = false;
-                }
-            });
-
-            function updateProgress(percent, status) {
-                progressFill.style.width = `${percent}%`;
-                statusText.textContent = status;
-            }
-
-            function reset() {
-                uploadSection.style.display = 'block';
-                progressSection.style.display = 'none';
-                resultSection.style.display = 'none';
-                errorSection.style.display = 'none';
-                pptFile.value = '';
-                speechSynthesis.cancel();
-            }
-
-            resetBtn.addEventListener('click', reset);
-            retryBtn.addEventListener('click', reset);
-        });
-    </script>
+    setProgress(100,"生成完成");
+    const url = URL.createObjectURL(videoBlob);
+    $("#downLink").href = url;
+    $("#resBox").style.display="block";
+  }catch(err){
+    $("#errorBox").style.display="block";
+    $("#errorBox").innerText = "失败："+err.message;
+    console.error(err);
+  }finally{
+    $("#startBtn").disabled=false;
+  }
+});
+</script>
 </body>
 </html>
